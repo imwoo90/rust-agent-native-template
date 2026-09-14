@@ -28,3 +28,14 @@ post = ["scripts/post.rhai"]
 
 [placeholders]
 description = { type = "string", prompt = "Project description:", default = "An Agent-Native Rust project with compile-time linting and living LLM-Wiki." }
+
+[placeholders.agent]
+type = "string"
+prompt = "Target AI Agent instructions to include:"
+choices = ["all", "claude", "cursor", "gemini", "copilot", "universal"]
+default = "all"
+
+[placeholders.clean]
+type = "bool"
+prompt = "Initialize with pristine empty scaffold (remove calculator demo)?:"
+default = false

@@ -88,7 +88,7 @@ rust-agent-native-template/
 
 ### Option A: Using `cargo-generate` (Recommended)
 ```bash
-# Generate a new project interactively
+# Generate a new project interactively (prompts for agent instructions & clean scaffold)
 cargo generate imwoo90/rust-agent-native-template --name my-project
 cd my-project
 ```
@@ -100,9 +100,12 @@ git clone https://github.com/imwoo90/rust-agent-native-template.git my-project
 cd my-project
 
 # 2. Initialize and re-namespace to your project name in 1 second:
-# Choose either:
-./scripts/init.sh my-project --clean  # Pristine empty scaffold for ANY project (e.g. Dioxus, Web, CLI)
-./scripts/init.sh my-project          # Retains calculator demo as living reference
+./scripts/init.sh my-project                      # Full template with all agent instructions
+./scripts/init.sh my-project --agent claude       # Retain only Claude Code instructions
+./scripts/init.sh my-project --agent cursor       # Retain only Cursor rules
+./scripts/init.sh my-project --agent gemini       # Retain only Gemini / Antigravity instructions
+./scripts/init.sh my-project --agent universal    # Pure AGENTS.md (no platform-specific bridges)
+./scripts/init.sh my-project --clean              # Pristine empty scaffold for ANY project (e.g. Dioxus, Web, CLI)
 ```
 
 ### 2. Verify Your Environment
