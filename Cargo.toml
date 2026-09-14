@@ -1,0 +1,15 @@
+[package]
+name = "rust-agent-native-template"
+version = "0.1.0"
+edition = "2024"
+authors = ["imwoo90 <wim90@kakao.com>"]
+license = "Apache-2.0"
+description = "An Agent-Native Rust project template engineered with compile-time linting, living LLM-Wiki context, and compiler-verified quality assurance."
+readme = "README.md"
+repository = "https://github.com/imwoo90/rust-agent-native-template"
+keywords = ["agent-native", "llm-wiki", "template", "linter", "ai-agent"]
+categories = ["development-tools"]
+
+[dependencies]
+
+[dev-dependencies]
