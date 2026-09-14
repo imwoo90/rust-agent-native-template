@@ -533,3 +533,123 @@ mod helpers {{
     let err = res.unwrap_err();
     assert!(err.contains("Rule 2"), "Error was: {}", err);
 }
+
+#[test]
+fn test_lifetimes_with_inline_comments_do_not_corrupt_parser() {
+    // Verifies that odd numbers of lifetimes ('a) do not leave quotes open and swallow inline comments.
+    let source = r#"//! # Lifetime Module Header
+//!
+//! This module verifies that lifetimes like `'a` and `'b` do not interfere with inline comment detection.
+
+pub fn parse<'a, 'b>(input: &'a str, _fallback: &'b str) -> Option<&'a str> { // Inline comment here
+    let _char_lit = 'c'; // Char literal should not lock parser
+    Some(input)
+}
+"#;
+    let res = linter::check_source(Path::new("src/lifetime.rs"), source);
+    assert!(res.is_ok(), "Expected lifetime source to pass: {:?}", res);
+}
+
+#[test]
+fn test_large_test_function_exceeding_2000_chars_is_exempt_from_rule_4() {
+    // Verifies that test functions inside #[cfg(test)] exceeding 2,000 chars are exempt from Rule 4.
+    let mut large_test_body = String::new();
+    for i in 0..70 {
+        large_test_body.push_str(&format!("        let _expected_table_entry_{} = {};\n", i, i * 10));
+    }
+
+    let source = format!(
+        r#"//! # Large Test Function Module
+//!
+//! Verifies that AGENTS.md Rule 4 does not penalize large test functions inside #[cfg(test)].
+
+pub fn small_prod() -> bool {{
+    true
+}}
+
+#[cfg(test)]
+mod tests {{
+    #[test]
+    fn test_large_dataset() {{
+{}
+        assert!(true);
+    }}
+}}
+"#,
+        large_test_body
+    );
+
+    let res = linter::check_source(Path::new("src/test_large_fn.rs"), &source);
+    assert!(
+        res.is_ok(),
+        "Expected large test function inside #[cfg(test)] to pass Rule 4: {:?}",
+        res
+    );
+}
+
+#[test]
+fn test_test_comments_do_not_consume_production_doc_budget() {
+    // Verifies that large explanatory comments in unit tests do not cause Rule 3 violation (> 4,000 chars).
+    let mut big_test_comments = String::new();
+    for i in 0..100 {
+        big_test_comments.push_str(&format!("    // Test step {}: Detailed comment explaining test behavior and assertions\n", i));
+    }
+
+    let source = format!(
+        r#"//! # Test Comments Isolation Module
+//!
+//! Verifies that comments inside test suites do not deplete the file documentation budget.
+
+pub fn prod_func() {{}}
+
+#[cfg(test)]
+mod tests {{
+{}
+    #[test]
+    fn sample_test() {{
+        assert_eq!(1 + 1, 2);
+    }}
+}}
+"#,
+        big_test_comments
+    );
+
+    let res = linter::check_source(Path::new("src/test_comments.rs"), &source);
+    assert!(
+        res.is_ok(),
+        "Expected test comments not to violate Rule 3: {:?}",
+        res
+    );
+}
+
+#[test]
+fn test_multisegment_test_attribute_tokio_test_exempt() {
+    // Verifies that #[tokio::test] functions are recognized as test scopes and exempt from Rule 4.
+    let mut large_async_body = String::new();
+    for i in 0..70 {
+        large_async_body.push_str(&format!("    let _state_{} = {};\n", i, i * 5));
+    }
+
+    let source = format!(
+        r#"//! # Tokio Test Module
+//!
+//! Verifies that functions annotated with multi-segment test attributes like `#[tokio::test]` are exempt from Rule 4.
+
+pub fn prod_small() {{}}
+
+#[tokio::test]
+async fn test_async_workflow() {{
+{}
+}}
+"#,
+        large_async_body
+    );
+
+    let res = linter::check_source(Path::new("src/async_test.rs"), &source);
+    assert!(
+        res.is_ok(),
+        "Expected #[tokio::test] function to be exempt from Rule 4: {:?}",
+        res
+    );
+}
+

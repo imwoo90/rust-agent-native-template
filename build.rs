@@ -125,10 +125,12 @@ pub fn check_source(path: &Path, content: &str) -> Result<(), String> {
     }
 
     // 4. Pass 3: AST Inspection for Function Physical Size (Rule 4)
-    if !file_has_skip {
+    if !file_has_skip && !is_test_file {
         let mut visitor = FunctionSizeChecker {
             path,
             source_lines: &lines,
+            is_test_file,
+            test_line_ranges: &scope_collector.test_line_ranges,
             current_impl_has_skip: false,
             errors: Vec::new(),
         };
@@ -158,7 +160,7 @@ pub fn is_path_test_file(path: &Path) -> bool {
     in_test_dir || is_test_filename
 }
 
-/// Checks if an item or file has an escape hatch attribute (e.g. `#[allow(clippy::too_many_lines)]`, `#[agent_lint(skip)]`).
+/// Checks if an item or file has an escape hatch attribute (e.g. `#[allow(clippy::too_many_lines)]`).
 fn has_skip_attribute(attrs: &[syn::Attribute]) -> bool {
     attrs.iter().any(|attr| {
         if attr.path().is_ident("allow")
@@ -172,17 +174,7 @@ fn has_skip_attribute(attrs: &[syn::Attribute]) -> bool {
                 return true;
             }
         }
-        let segs: Vec<String> = attr
-            .path()
-            .segments
-            .iter()
-            .map(|s| s.ident.to_string())
-            .collect();
-        let path_str = segs.join("::");
-        path_str == "agent_lint"
-            || path_str == "agent_native"
-            || path_str == "agent_lint::skip"
-            || path_str == "agent_native::skip"
+        false
     })
 }
 
@@ -222,7 +214,12 @@ impl<'ast> Visit<'ast> for TestScopeCollector {
 /// and accurately differentiating `test` predicates from `not(test)` or feature flags.
 fn is_cfg_test(attrs: &[syn::Attribute]) -> bool {
     attrs.iter().any(|attr| {
-        if attr.path().is_ident("test") {
+        if attr
+            .path()
+            .segments
+            .last()
+            .is_some_and(|seg| seg.ident == "test" || seg.ident == "rstest")
+        {
             return true;
         }
         if attr.path().is_ident("cfg")
@@ -268,6 +265,8 @@ fn is_cfg_test(attrs: &[syn::Attribute]) -> bool {
 struct FunctionSizeChecker<'a> {
     path: &'a Path,
     source_lines: &'a [&'a str],
+    is_test_file: bool,
+    test_line_ranges: &'a [RangeInclusive<usize>],
     current_impl_has_skip: bool,
     errors: Vec<String>,
 }
@@ -280,7 +279,11 @@ impl<'a> FunctionSizeChecker<'a> {
         sig_span: proc_macro2::Span,
         body_span: proc_macro2::Span,
     ) {
-        if self.current_impl_has_skip || has_skip_attribute(attrs) {
+        if self.is_test_file
+            || self.current_impl_has_skip
+            || has_skip_attribute(attrs)
+            || is_cfg_test(attrs)
+        {
             return;
         }
 
@@ -288,6 +291,11 @@ impl<'a> FunctionSizeChecker<'a> {
         let end = body_span.end();
 
         if start.line == 0 || end.line == 0 || start.line > self.source_lines.len() {
+            return;
+        }
+
+        // Exempt functions inside test scopes to preserve TDD incentives
+        if self.test_line_ranges.iter().any(|r| r.contains(&start.line)) {
             return;
         }
 
@@ -359,7 +367,9 @@ fn scan_code_and_comments(
         let is_in_test_scope = is_test_file || test_ranges.iter().any(|r| r.contains(&line_num));
 
         if in_block_comment {
-            doc_chars += line_char_count;
+            if !is_in_test_scope {
+                doc_chars += line_char_count;
+            }
             if let Some(pos) = trimmed.find("*/") {
                 in_block_comment = false;
                 let remainder = trimmed[pos + 2..].trim();
@@ -384,13 +394,17 @@ fn scan_code_and_comments(
         // [P1 Fix]: Line comments MUST be evaluated BEFORE raw string markers
         // to prevent comments like `// pattern r#"..."#` from falsely locking into raw string mode!
         if trimmed.starts_with("//") {
-            doc_chars += line_char_count;
+            if !is_in_test_scope {
+                doc_chars += line_char_count;
+            }
             continue;
         }
 
         // Check standard block comment start
         if trimmed.starts_with("/*") {
-            doc_chars += line_char_count;
+            if !is_in_test_scope {
+                doc_chars += line_char_count;
+            }
             if !trimmed.contains("*/") {
                 in_block_comment = true;
             }
@@ -417,8 +431,8 @@ fn scan_code_and_comments(
             let comment_part = &trimmed[slash_pos..];
             if !is_in_test_scope {
                 prod_logical_code_chars += code_part.chars().count() + 1;
+                doc_chars += comment_part.chars().count();
             }
-            doc_chars += comment_part.chars().count();
         } else if !is_in_test_scope {
             prod_logical_code_chars += line_char_count;
         }
@@ -427,22 +441,64 @@ fn scan_code_and_comments(
     (prod_logical_code_chars, doc_chars)
 }
 
+/// Helper to parse character literal byte length starting with `'`.
+/// Returns Some(len) if it is a valid char literal (e.g. `'c'`, `'\n'`).
+/// Returns None if it is a lifetime (e.g. `'a`, `'static`, `'_`).
+fn parse_char_literal_len(rem: &str) -> Option<usize> {
+    if !rem.starts_with('\'') {
+        return None;
+    }
+    let mut chars = rem[1..].chars();
+    let first = chars.next()?;
+    if first == '\\' {
+        let mut byte_len = 2; // '\'' + '\\'
+        for c in chars {
+            byte_len += c.len_utf8();
+            if c == '\'' {
+                return Some(byte_len);
+            }
+            if byte_len > 12 {
+                break;
+            }
+        }
+        None
+    } else if first != '\'' {
+        let second = chars.next()?;
+        if second == '\'' {
+            Some(1 + first.len_utf8() + 1)
+        } else {
+            None
+        }
+    } else {
+        None
+    }
+}
+
 /// Finds the start position of an inline `//` comment that is not inside quotes.
 fn find_inline_comment(line: &str) -> Option<usize> {
-    let mut in_quote = false;
-    let mut quote_char = ' ';
+    let mut in_string = false;
     let mut chars = line.char_indices().peekable();
 
     while let Some((idx, ch)) = chars.next() {
-        if in_quote {
+        if in_string {
             if ch == '\\' {
                 chars.next(); // Skip escaped character
-            } else if ch == quote_char {
-                in_quote = false;
+            } else if ch == '"' {
+                in_string = false;
             }
-        } else if ch == '"' || ch == '\'' {
-            in_quote = true;
-            quote_char = ch;
+        } else if ch == '"' {
+            in_string = true;
+        } else if ch == '\'' {
+            if let Some(len) = parse_char_literal_len(&line[idx..]) {
+                let target_idx = idx + len;
+                while let Some(&(next_idx, _)) = chars.peek() {
+                    if next_idx < target_idx {
+                        chars.next();
+                    } else {
+                        break;
+                    }
+                }
+            }
         } else if ch == '/'
             && let Some(&(_, next_ch)) = chars.peek()
             && next_ch == '/'
