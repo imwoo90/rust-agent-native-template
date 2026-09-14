@@ -39,6 +39,41 @@ pub fn run() {}
 }
 
 #[test]
+fn test_production_file_with_test_in_name_still_enforces_rules() {
+    // Files like `src/contest.rs`, `src/attestation.rs`, or `src/latest.rs`
+    // must NOT bypass Rule 1 or Rule 2 simply because their name contains the substring "test".
+    let source = r#"//! Short header
+
+pub fn run() {}
+"#;
+    let res = linter::check_source(Path::new("src/contest.rs"), source);
+    assert!(
+        res.is_err(),
+        "Expected production file with 'test' in name to enforce Rule 1"
+    );
+    let err = res.unwrap_err();
+    assert!(err.contains("Rule 1"), "Error was: {}", err);
+}
+
+#[test]
+fn test_syntax_error_passes_gracefully_to_rustc() {
+    // When code has a syntax error/typo, build.rs should gracefully pass through to rustc
+    // so that rustc can emit its rich diagnostic messages with spans and suggestions.
+    let source = r#"//! # Broken Syntax Test Module
+//!
+//! Intentionally contains invalid syntax to verify that build.rs does not mask compiler errors.
+
+pub fn broken( {
+"#;
+    let res = linter::check_source(Path::new("src/broken.rs"), source);
+    assert!(
+        res.is_ok(),
+        "Expected syntax error to pass through to rustc: {:?}",
+        res
+    );
+}
+
+#[test]
 fn test_excessive_logical_code_fails_rule_2() {
     // Generate 20 functions of ~700 characters each (total > 14,000 chars, each function < 2,000 chars)
     let mut big_body = String::new();
@@ -181,6 +216,40 @@ impl Engine {{
 }
 
 #[test]
+fn test_escape_hatch_allows_large_functions() {
+    // Verifies that functions annotated with #[allow(clippy::too_many_lines)]
+    // can exceed the 2,000-character limit (e.g. for complex Dioxus rsx! components or state machines).
+    let mut big_body = String::new();
+    for i in 0..100 {
+        big_body.push_str(&format!("        let _variable_{} = {};\n", i, i));
+    }
+
+    let source = format!(
+        r#"//! # Escape Hatch Test Module
+//!
+//! Verifies that the escape hatch attribute allows complex functions to exceed limits when explicitly intended.
+
+pub struct MacroUi;
+
+impl MacroUi {{
+    #[allow(clippy::too_many_lines)]
+    pub fn complex_ui_component(&self) {{
+{}
+    }}
+}}
+"#,
+        big_body
+    );
+
+    let res = linter::check_source(Path::new("src/ui.rs"), &source);
+    assert!(
+        res.is_ok(),
+        "Expected function with escape hatch to pass: {:?}",
+        res
+    );
+}
+
+#[test]
 fn test_braces_in_strings_and_comments_pass() {
     let source = r#"//! # Braces In Strings And Comments Test Module
 //!
@@ -199,6 +268,29 @@ pub fn generate_json() -> &'static str {
     assert!(
         res.is_ok(),
         "Expected braces in strings/comments to pass: {:?}",
+        res
+    );
+}
+
+#[test]
+fn test_raw_string_with_comment_markers_does_not_corrupt_doc_count() {
+    let source = r##"//! # Raw String Test Module
+//!
+//! Verifies that raw string literals containing comment delimiters like /* and //
+//! do not corrupt the comment or production code counters.
+
+pub fn get_sql() -> &'static str {
+    let _query = r#"
+    /* SQL block comment inside string literal */
+    SELECT * FROM users WHERE active = true; // line comment inside string literal
+    "#;
+    _query
+}
+"##;
+    let res = linter::check_source(Path::new("src/sql_query.rs"), source);
+    assert!(
+        res.is_ok(),
+        "Expected raw strings with comment delimiters to pass: {:?}",
         res
     );
 }

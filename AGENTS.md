@@ -30,12 +30,14 @@ To keep files compact, modular, and optimized for LLM context windows, strict ar
    * The total character count of active production code lines (excluding comments, doc comments, empty lines, and `#[cfg(test)]` blocks) must be **under 10,000 characters** (approx. 200–300 lines of SLOC).
    * Note: Comprehensive unit tests in `#[cfg(test)]` do not count against this limit, fully preserving TDD incentives.
    * Exceeding this limit indicates bloated responsibility; split into cohesive submodules.
+   * *Escape Hatch*: For declarative UI files or code-generated suites, annotate the file with `#![allow(clippy::too_many_lines)]` to bypass this constraint.
 3. **Rule 3: File Documentation Limit (Max 4,000 Characters)**:
    * The total character count of documentation comments (`//`, `///`, `//!`, `/* */`) must be **under 4,000 characters** (approx. 50–80 lines).
    * This forces descriptions to remain concise and high-signal, preventing LLM context bloat.
 4. **Rule 4: Function Physical Size Limit (Max 2,000 Characters)**:
    * A single function (including its signature, body, comments, and braces) must be **under 2,000 characters** (approx. 40–50 physical lines).
    * Ensures every function fits cleanly on a single screen or within a single context window turn.
+   * *Escape Hatch*: For macro-heavy UI components (e.g. Dioxus `rsx!`), large router tables (e.g. Axum), or complex state machines that cannot be cleanly split, annotate the function with `#[allow(clippy::too_many_lines)]` to explicitly bypass this check.
 
 ---
 

@@ -55,9 +55,34 @@ cd "${ROOT_DIR}"
 OLD_KEBAB="rust-agent-native-template"
 OLD_SNAKE="rust_agent_native_template"
 
+# Portable sed helper supporting both macOS (BSD) and Linux (GNU)
+sedi() {
+    local expr="$1"
+    shift
+    for f in "$@"; do
+        if [[ "$(uname)" == "Darwin" ]]; then
+            sed -i '' "$expr" "$f"
+        else
+            sed -i "$expr" "$f"
+        fi
+    done
+}
+
+replace_pattern() {
+    local pattern="$1"
+    local dir="$2"
+    while IFS= read -r -d '' file; do
+        if [[ "$(uname)" == "Darwin" ]]; then
+            sed -i '' "$pattern" "$file"
+        else
+            sed -i "$pattern" "$file"
+        fi
+    done < <(find "$dir" -type f -name "*.rs" -print0)
+}
+
 # 1. Update Cargo.toml
 echo "--> Updating Cargo.toml..."
-sed -i "s/name = \"${OLD_KEBAB}\"/name = \"${KEBAB_NAME}\"/g" Cargo.toml
+sedi "s/name = \"${OLD_KEBAB}\"/name = \"${KEBAB_NAME}\"/g" Cargo.toml
 
 # 2. Handle Clean Mode or Standard Rename
 if [ "${CLEAN_MODE}" = true ]; then
@@ -99,22 +124,24 @@ EOF
 
 else
     echo "--> Standard mode: Updating source files..."
-    find src -type f -name "*.rs" -exec sed -i "s/${OLD_KEBAB}/${KEBAB_NAME}/g" {} +
-    find src -type f -name "*.rs" -exec sed -i "s/${OLD_SNAKE}/${SNAKE_NAME}/g" {} +
+    replace_pattern "s/${OLD_KEBAB}/${KEBAB_NAME}/g" src
+    replace_pattern "s/${OLD_SNAKE}/${SNAKE_NAME}/g" src
 
     echo "--> Updating integration tests..."
-    find tests -type f -name "*.rs" -exec sed -i "s/${OLD_SNAKE}/${SNAKE_NAME}/g" {} +
-    find tests -type f -name "*.rs" -exec sed -i "s/${OLD_KEBAB}/${KEBAB_NAME}/g" {} +
+    replace_pattern "s/${OLD_SNAKE}/${SNAKE_NAME}/g" tests
+    replace_pattern "s/${OLD_KEBAB}/${KEBAB_NAME}/g" tests
 fi
 
 # 3. Always update linter test suite references
-find tests -type f -name "linter_test.rs" -exec sed -i "s/${OLD_SNAKE}/${SNAKE_NAME}/g" {} +
+if [ -f "tests/linter_test.rs" ]; then
+    sedi "s/${OLD_SNAKE}/${SNAKE_NAME}/g" tests/linter_test.rs
+fi
 
 # 4. Update README.md
 echo "--> Updating README.md..."
-sed -i "s/# 🤖 Rust Agent-Native Template/# 🤖 ${KEBAB_NAME}/g" README.md
-sed -i "s/${OLD_KEBAB}/${KEBAB_NAME}/g" README.md
-sed -i "s/${OLD_SNAKE}/${SNAKE_NAME}/g" README.md
+sedi "s/# 🤖 Rust Agent-Native Template/# 🤖 ${KEBAB_NAME}/g" README.md
+sedi "s/${OLD_KEBAB}/${KEBAB_NAME}/g" README.md
+sedi "s/${OLD_SNAKE}/${SNAKE_NAME}/g" README.md
 
 # 5. Verify build and test suite under new identity
 echo "--> Verifying compile-time constraints and test suite..."
