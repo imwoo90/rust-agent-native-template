@@ -30,10 +30,13 @@ To prevent documentation rot and maximize the signal-to-noise ratio (SNR) in LLM
 
 To prevent monoliths and keep files optimized for LLM context windows, strict AST constraints are enforced during `cargo check`, `cargo build`, and `cargo test`:
 
-1. **Rule 1: File-Level Living Wiki Header (Min 100 Characters)**:
+1. **Rule 1: File-Level Living Wiki Header (Min 100 Chars & Schema Enforcement)**:
    * Every non-test production `.rs` file must begin with a file-level doc comment (`//!`) of **at least 100 characters**.
-   * **For `mod.rs`**: Follow the `index.md` format (`## Overview`, `## Submodules` with 1-line child summaries, `## Search Tags`).
-   * **For leaf `.rs` files**: Follow the focused component format (`## Overview` with single responsibility, `## Search Tags`). Keep it dense and free of redundant dependency text.
+   * **Compile-Time Schema Enforcement (`build_linter.rs`)**:
+     - `## Overview`: Mandatory for all production files. Details component responsibility in 1-2 concise sentences.
+     - `## Search Tags`: Mandatory for all production files. Must include deterministic hashtags (e.g. `#keyword`).
+     - `## Submodules`: Mandatory for any module declaring child submodules via `mod <name>;`. Every declared submodule must be documented with a 1-line summary; omitting a submodule triggers a compilation error (zero catalog drift).
+   * Schema enforcement is enabled by default (`enforce_doc_schema = true`), configurable via `.agent-lint.toml`.
 2. **Rule 2: Production Logical Code Limit (Max 10,000 Characters)**:
    * The character count of active production code (excluding comments, doc comments, blank lines, and `#[cfg(test)]` modules) must not exceed **10,000 characters** (~200–300 lines of SLOC).
    * Exceeding this limit indicates bloated responsibility; split into cohesive submodules.

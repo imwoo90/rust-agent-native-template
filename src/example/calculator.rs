@@ -1,5 +1,6 @@
 //! # Calculator Engine Module
 //!
+//! ## Overview
 //! Provides fundamental arithmetic operations designed as an executable, compiler-verified example
 //! of the Agent-Native pattern. Includes unit tests, executable doctests, and typed error handling.
 //!

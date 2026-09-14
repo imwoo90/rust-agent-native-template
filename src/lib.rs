@@ -1,11 +1,15 @@
 //! # Rust Agent-Native Template Library
 //!
-//! This library provides a foundational architecture engineered for seamless collaboration
-//! between human engineers and AI coding agents. It demonstrates living LLM-Wiki documentation,
-//! compiler-enforced constraints, and strict quality verification.
+//! ## Overview
+//! Foundational library engineered for seamless collaboration between human engineers
+//! and AI coding agents. Demonstrates living LLM-Wiki documentation, compiler-enforced constraints,
+//! and strict quality verification.
 //!
-//! ## Modules
+//! ## Submodules
 //! - [`example`]: Demonstrates modular directory layout, intra-doc links, and executable doctests.
+//!
+//! ## Search Tags
+//! #agent-native, #template, #living-wiki, #architecture
 
 pub mod example;
 

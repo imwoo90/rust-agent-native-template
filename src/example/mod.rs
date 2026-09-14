@@ -1,6 +1,7 @@
 //! # Example Submodule: Architecture & Computation Catalog
 //!
-//! This module showcases the **`mod.rs` = `index.md`** pattern. It acts as the high-level
+//! ## Overview
+//! Showcases the **`mod.rs` = `index.md`** pattern. Acts as the high-level
 //! architectural catalog for the computation sub-domain, detailing component boundaries,
 //! data flows, and public interface re-exports.
 //!

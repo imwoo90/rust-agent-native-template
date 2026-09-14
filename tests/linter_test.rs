@@ -10,8 +10,12 @@ use std::path::Path;
 fn test_valid_file_passes() {
     let source = r#"//! # Valid Test Module
 //!
+//! ## Overview
 //! This is a valid test module designed to verify that the compile-time AST linter correctly accepts
 //! production source files that meet all file-header, character count, and function size requirements.
+//!
+//! ## Search Tags
+//! #test, #valid, #linter
 
 /// A sample public struct.
 pub struct Sample;
@@ -62,7 +66,11 @@ fn test_syntax_error_passes_gracefully_to_rustc() {
     // so that rustc can emit its rich diagnostic messages with spans and suggestions.
     let source = r#"//! # Broken Syntax Test Module
 //!
+//! ## Overview
 //! Intentionally contains invalid syntax to verify that build.rs does not mask compiler errors.
+//!
+//! ## Search Tags
+//! #test, #linter
 
 pub fn broken( {
 "#;
@@ -89,8 +97,12 @@ fn test_excessive_logical_code_fails_rule_2() {
     let source = format!(
         r#"//! # Excessive Code Module
 //!
+//! ## Overview
 //! This module intentionally exceeds the 10,000-character logical code budget across multiple
 //! functions to verify that AGENTS.md Rule 2 triggers and halts compilation.
+//!
+//! ## Search Tags
+//! #test, #linter
 
 {}
 "#,
@@ -122,8 +134,12 @@ fn test_large_test_module_does_not_penalize_production_code_limit() {
     let source = format!(
         r#"//! # Test-Heavy Module
 //!
+//! ## Overview
 //! Verifies that comprehensive unit tests inside `#[cfg(test)]` do not count against the
 //! production logical code limit of 10,000 characters (AGENTS.md Rule 2).
+//!
+//! ## Search Tags
+//! #test, #linter
 
 /// A public production worker struct.
 pub struct Worker;
@@ -166,6 +182,10 @@ fn test_excessive_documentation_fails_rule_3() {
     let source = format!(
         r#"//! # Excessive Doc Module
 //!
+//! ## Overview
+//!
+//! ## Search Tags
+//! #test, #linter
 {}
 pub fn short_code() {{}}
 "#,
@@ -192,8 +212,12 @@ fn test_large_function_in_impl_block_fails_rule_4() {
     let source = format!(
         r#"//! # Large Method Test Module
 //!
+//! ## Overview
 //! Verifies that methods inside `impl` blocks exceeding 2,000 characters are correctly detected
 //! by the AST visitor and rejected per AGENTS.md Rule 4.
+//!
+//! ## Search Tags
+//! #test, #linter
 
 pub struct Engine;
 
@@ -228,7 +252,11 @@ fn test_escape_hatch_disallowed_and_fails_rule_4() {
     let source = format!(
         r#"//! # Escape Hatch Test Module
 //!
+//! ## Overview
 //! Verifies that the escape hatch attribute no longer allows complex functions to exceed limits.
+//!
+//! ## Search Tags
+//! #test, #linter
 
 pub struct MacroUi;
 
@@ -256,8 +284,12 @@ impl MacroUi {{
 fn test_braces_in_strings_and_comments_pass() {
     let source = r#"//! # Braces In Strings And Comments Test Module
 //!
+//! ## Overview
 //! Verifies that string literals containing braces (such as JSON mockups) and comments with braces
 //! do not distort the AST parser or cause false-positive function size errors.
+//!
+//! ## Search Tags
+//! #test, #linter
 
 pub fn generate_json() -> &'static str {
     // Note: { this opening brace in a comment } should not confuse the parser!
@@ -279,8 +311,12 @@ pub fn generate_json() -> &'static str {
 fn test_raw_string_with_comment_markers_does_not_corrupt_doc_count() {
     let source = r##"//! # Raw String Test Module
 //!
+//! ## Overview
 //! Verifies that raw string literals containing comment delimiters like /* and //
 //! do not corrupt the comment or production code counters.
+//!
+//! ## Search Tags
+//! #test, #linter
 
 pub fn get_sql() -> &'static str {
     let _query = r#"
@@ -302,8 +338,12 @@ pub fn get_sql() -> &'static str {
 fn test_attributed_and_multiline_functions_pass() {
     let source = r#"//! # Attributed Function Test Module
 //!
+//! ## Overview
 //! Verifies that functions preceded by outer attributes (e.g. `#[inline]`, `#[allow(...)]`)
 //! and functions with multi-line signatures and where clauses are parsed accurately.
+//!
+//! ## Search Tags
+//! #test, #linter
 
 pub struct Worker;
 
@@ -333,7 +373,11 @@ impl Worker {
 fn test_comment_containing_raw_string_syntax_does_not_lock_parser() {
     let source = r##"//! # Raw String In Comment Test Module
 //!
+//! ## Overview
 //! Verifies that comments mentioning raw string syntax like `r#"..."#` do not falsely lock the parser.
+//!
+//! ## Search Tags
+//! #test, #linter
 
 // Tip: You can define raw strings using r#"syntax"# in Rust.
 // This second comment should still be recognized as a comment, not code!
@@ -366,7 +410,11 @@ fn test_unicode_korean_comments_do_not_suffer_byte_penalty() {
     let source = format!(
         r#"//! # 한국어 유니코드 주석 테스트 모듈
 //!
+//! ## Overview
 //! 본 모듈은 CJK 다국어 주석이 UTF-8 바이트(Byte) 단위가 아닌 유니코드 글자(Char) 단위로 측정됨을 증명하는 공식 검증 모듈입니다.
+//!
+//! ## Search Tags
+//! #test, #linter
 
 {}
 pub fn run_korean_task() -> bool {{
@@ -394,7 +442,11 @@ fn test_impl_level_escape_hatch_disallowed_and_fails_rule_4() {
     let source = format!(
         r#"//! # Impl Escape Hatch Test Module
 //!
+//! ## Overview
 //! Verifies that `#[allow(clippy::too_many_lines)]` placed on an `impl` block does not bypass Rule 4.
+//!
+//! ## Search Tags
+//! #test, #linter
 
 pub struct MacroUi;
 
@@ -437,7 +489,11 @@ pub fn boundary_ok() {{}}
         exact_100
     );
 
-    let res = linter::check_source(Path::new("src/boundary_100.rs"), &source);
+    let config = linter::LinterConfig {
+        enforce_doc_schema: false,
+        ..Default::default()
+    };
+    let res = linter::check_source_with_config(Path::new("src/boundary_100.rs"), &source, &config);
     assert!(
         res.is_ok(),
         "Expected exactly 100-character header to pass Rule 1: {:?}",
@@ -459,7 +515,11 @@ pub fn boundary_fail() {{}}
         exact_99
     );
 
-    let res = linter::check_source(Path::new("src/boundary_99.rs"), &source);
+    let config = linter::LinterConfig {
+        enforce_doc_schema: false,
+        ..Default::default()
+    };
+    let res = linter::check_source_with_config(Path::new("src/boundary_99.rs"), &source, &config);
     assert!(
         res.is_err(),
         "Expected 99-character header to fail Rule 1 constraint"
@@ -484,7 +544,11 @@ fn test_compound_cfg_with_not_feature_and_test_scope() {
     let source = format!(
         r#"//! # Compound CFG Test Module
 //!
+//! ## Overview
 //! Verifies that `#[cfg(all(not(feature = "mock"), test))]` is recognized as a test scope.
+//!
+//! ## Search Tags
+//! #test, #linter
 
 #[cfg(all(not(feature = "mock"), test))]
 mod tests {{
@@ -520,7 +584,11 @@ fn test_compound_cfg_with_feature_test_utils_is_not_test_scope() {
     let source = format!(
         r#"//! # Feature Test Utils Module
 //!
+//! ## Overview
 //! Verifies that `#[cfg(all(feature = "test-utils"))]` is recognized as production code.
+//!
+//! ## Search Tags
+//! #test, #linter
 
 #[cfg(all(feature = "test-utils"))]
 mod helpers {{
@@ -544,7 +612,11 @@ fn test_lifetimes_with_inline_comments_do_not_corrupt_parser() {
     // Verifies that odd numbers of lifetimes ('a) do not leave quotes open and swallow inline comments.
     let source = r#"//! # Lifetime Module Header
 //!
+//! ## Overview
 //! This module verifies that lifetimes like `'a` and `'b` do not interfere with inline comment detection.
+//!
+//! ## Search Tags
+//! #test, #linter
 
 pub fn parse<'a, 'b>(input: &'a str, _fallback: &'b str) -> Option<&'a str> { // Inline comment here
     let _char_lit = 'c'; // Char literal should not lock parser
@@ -567,7 +639,11 @@ fn test_large_test_function_exceeding_2000_chars_fails_rule_4() {
     let source = format!(
         r#"//! # Large Test Function Module
 //!
+//! ## Overview
 //! Verifies that AGENTS.md Rule 4 enforces the 2,000-char limit on test functions as well.
+//!
+//! ## Search Tags
+//! #test, #linter
 
 pub fn small_prod() -> bool {{
     true
@@ -611,7 +687,11 @@ fn test_inline_tests_exceeding_5000_chars_fails_rule_2b() {
     let source = format!(
         r#"//! # Inline Test Bloat Module
 //!
+//! ## Overview
 //! Verifies that excessive inline test code in src/ triggers Rule 2b.
+//!
+//! ## Search Tags
+//! #test, #linter
 
 pub fn prod_func() -> usize {{ 42 }}
 
@@ -639,7 +719,11 @@ fn test_nested_block_comments_do_not_prematurely_exit() {
     // Verifies that nested block comments /* /* */ */ are correctly tracked by depth.
     let source = r#"//! # Nested Comment Module
 //!
+//! ## Overview
 //! Verifies that Rust nested block comments do not prematurely exit comment scanning mode.
+//!
+//! ## Search Tags
+//! #test, #linter
 
 pub fn calculate() -> i32 {
     /*
@@ -670,7 +754,11 @@ fn test_test_comments_do_not_consume_production_doc_budget() {
     let source = format!(
         r#"//! # Test Comments Isolation Module
 //!
+//! ## Overview
 //! Verifies that comments inside test suites do not deplete the file documentation budget.
+//!
+//! ## Search Tags
+//! #test, #linter
 
 pub fn prod_func() {{}}
 
@@ -705,7 +793,11 @@ fn test_multisegment_test_attribute_tokio_test_exempt_from_rule_2() {
     let source = format!(
         r#"//! # Tokio Test Module
 //!
+//! ## Overview
 //! Verifies that functions annotated with multi-segment test attributes like `#[tokio::test]` are recognized as test scopes.
+//!
+//! ## Search Tags
+//! #test, #linter
 
 pub fn prod_small() {{}}
 
@@ -741,6 +833,7 @@ fn test_custom_config_enforced_in_check_source() {
     // Verifies that a stricter custom configuration triggers when threshold is exceeded
     let custom_config = linter::LinterConfig {
         min_module_doc_chars: 100,
+        enforce_doc_schema: false,
         max_logical_code_chars: 200, // Very strict limit
         max_inline_test_chars: 5_000,
         max_doc_chars: 4_000,
@@ -749,7 +842,11 @@ fn test_custom_config_enforced_in_check_source() {
 
     let source = r#"//! # Strict Config Test Module
 //!
+//! ## Overview
 //! Valid header with more than 100 characters to pass rule 1 check successfully.
+//!
+//! ## Search Tags
+//! #test, #linter
 
 pub fn generate_data() {
     let _a = 1;
@@ -813,7 +910,11 @@ fn test_single_line_raw_string_does_not_leak_raw_string_state() {
     // into subsequent lines, ensuring inline comments on subsequent lines are recognized.
     let source = r##"//! # Single Line Raw String Test Module
 //!
+//! ## Overview
 //! Valid header with more than 100 characters to pass rule 1 check successfully.
+//!
+//! ## Search Tags
+//! #test, #linter
 
 pub fn run_test() {
     let _s = r#"hello"#.to_string();
@@ -831,7 +932,11 @@ fn test_multiline_normal_string_with_comment_markers_does_not_corrupt_counts() {
     // is counted as logical code and does not get falsely identified as documentation comments.
     let source = r#"//! # Multiline Normal String Test Module
 //!
+//! ## Overview
 //! Valid header with more than 100 characters to pass rule 1 check successfully.
+//!
+//! ## Search Tags
+//! #test, #linter
 
 pub fn generate_template() -> &'static str {
     "
@@ -855,7 +960,11 @@ fn test_escaped_quote_char_literal_does_not_corrupt_parser() {
     // Verifies that character literal '\''' does not prematurely close or corrupt quote scanning.
     let source = r#"//! # Escaped Char Literal Test Module
 //!
+//! ## Overview
 //! Valid header with more than 100 characters to pass rule 1 check successfully.
+//!
+//! ## Search Tags
+//! #test, #linter
 
 pub fn check_quotes() -> bool {
     let _quote = '\'';
@@ -888,6 +997,136 @@ fn test_submodule_test_file_path_recognized() {
     assert!(!linter::is_path_test_file(Path::new("src/contest.rs")));
     assert!(!linter::is_path_test_file(Path::new("src/attestation.rs")));
 }
+
+#[test]
+fn test_schema_missing_overview_fails() {
+    let source = r#"//! # Test Module
+//!
+//! Valid header with more than 100 characters to pass rule 1 length check, but missing overview.
+//!
+//! ## Search Tags
+//! #test, #linter
+
+pub fn run() {}
+"#;
+    let res = linter::check_source(Path::new("src/no_overview.rs"), source);
+    assert!(res.is_err());
+    let err = res.unwrap_err();
+    assert!(err.contains("Living Wiki Schema: Missing Overview"), "Got: {}", err);
+}
+
+#[test]
+fn test_schema_missing_search_tags_fails() {
+    let source = r#"//! # Test Module
+//!
+//! ## Overview
+//! Valid header with more than 100 characters to pass rule 1 length check, but missing search tags.
+
+pub fn run() {}
+"#;
+    let res = linter::check_source(Path::new("src/no_tags.rs"), source);
+    assert!(res.is_err());
+    let err = res.unwrap_err();
+    assert!(err.contains("Living Wiki Schema: Missing Search Tags"), "Got: {}", err);
+}
+
+#[test]
+fn test_schema_search_tags_without_hashtag_fails() {
+    let source = r#"//! # Test Module
+//!
+//! ## Overview
+//! Valid header with more than 100 characters to pass rule 1 length check, but tags have no hashtag.
+//!
+//! ## Search Tags
+//! keyword1, keyword2
+
+pub fn run() {}
+"#;
+    let res = linter::check_source(Path::new("src/no_hashtag.rs"), source);
+    assert!(res.is_err());
+    let err = res.unwrap_err();
+    assert!(err.contains("Living Wiki Schema: Missing Search Tags"), "Got: {}", err);
+}
+
+#[test]
+fn test_schema_missing_submodules_catalog_fails() {
+    let source = r#"//! # Test Catalog Module
+//!
+//! ## Overview
+//! Valid header with more than 100 characters to pass rule 1 length check, but missing submodules.
+//!
+//! ## Search Tags
+//! #catalog, #submodules
+
+pub mod child_a;
+pub mod child_b;
+"#;
+    let res = linter::check_source(Path::new("src/parent/mod.rs"), source);
+    assert!(res.is_err());
+    let err = res.unwrap_err();
+    assert!(err.contains("Living Wiki Schema: Missing Submodules Catalog"), "Got: {}", err);
+}
+
+#[test]
+fn test_schema_submodule_catalog_drift_fails() {
+    let source = r#"//! # Test Catalog Module
+//!
+//! ## Overview
+//! Valid header with more than 100 characters to pass rule 1 length check, but forgets child_b.
+//!
+//! ## Submodules
+//! - [`child_a`]: First child module doing computation.
+//!
+//! ## Search Tags
+//! #catalog, #submodules
+
+pub mod child_a;
+pub mod child_b;
+"#;
+    let res = linter::check_source(Path::new("src/parent/mod.rs"), source);
+    assert!(res.is_err());
+    let err = res.unwrap_err();
+    assert!(err.contains("Living Wiki Schema: Submodule Catalog Drift"), "Got: {}", err);
+    assert!(err.contains("child_b"), "Expected mention of child_b, got: {}", err);
+}
+
+#[test]
+fn test_schema_valid_with_submodules_passes() {
+    let source = r#"//! # Test Catalog Module
+//!
+//! ## Overview
+//! Valid header with more than 100 characters to pass rule 1 length check, documenting all submodules.
+//!
+//! ## Submodules
+//! - [`child_a`]: First child module doing computation.
+//! - [`child_b`]: Second child module doing validation.
+//!
+//! ## Search Tags
+//! #catalog, #submodules
+
+pub mod child_a;
+pub mod child_b;
+"#;
+    let res = linter::check_source(Path::new("src/parent/mod.rs"), source);
+    assert!(res.is_ok(), "Expected valid submodules catalog to pass: {:?}", res);
+}
+
+#[test]
+fn test_schema_disabled_via_config_passes() {
+    let source = r#"//! # Test Module Without Schema
+//!
+//! Valid header with more than 100 characters to pass rule 1 length check, completely omitting overview and tags.
+
+pub fn run() {}
+"#;
+    let config = linter::LinterConfig {
+        enforce_doc_schema: false,
+        ..Default::default()
+    };
+    let res = linter::check_source_with_config(Path::new("src/no_schema.rs"), source, &config);
+    assert!(res.is_ok(), "Expected schema enforcement bypass when enforce_doc_schema=false: {:?}", res);
+}
+
 
 
 

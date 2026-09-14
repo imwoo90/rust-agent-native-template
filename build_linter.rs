@@ -17,6 +17,8 @@ use syn::visit::Visit;
 pub struct LinterConfig {
     /// Minimum characters required in module-level `//!` doc header (Rule 1).
     pub min_module_doc_chars: usize,
+    /// Enforces structured Living Wiki schema (## Overview, ## Search Tags, ## Submodules) (Rule 1).
+    pub enforce_doc_schema: bool,
     /// Maximum logical production code characters per file (Rule 2).
     pub max_logical_code_chars: usize,
     /// Maximum inline test characters in `src/` files before requiring extraction to `tests/` (Rule 2b).
@@ -31,6 +33,7 @@ impl Default for LinterConfig {
     fn default() -> Self {
         Self {
             min_module_doc_chars: 100,
+            enforce_doc_schema: true,
             max_logical_code_chars: 10_000,
             max_inline_test_chars: 5_000,
             max_doc_chars: 4_000,
@@ -58,7 +61,11 @@ pub fn load_config(root_dir: &Path) -> LinterConfig {
         if let Some((key, val)) = trimmed.split_once('=') {
             let key = key.trim();
             let val = val.split('#').next().unwrap_or("").trim().trim_matches('"');
-            if let Ok(num) = val.parse::<usize>() {
+            if key == "enforce_doc_schema" {
+                if let Ok(b) = val.parse::<bool>() {
+                    config.enforce_doc_schema = b;
+                }
+            } else if let Ok(num) = val.parse::<usize>() {
                 match key {
                     "min_module_doc_chars" => config.min_module_doc_chars = num,
                     "max_logical_code_chars" => config.max_logical_code_chars = num,
@@ -177,6 +184,7 @@ pub fn check_source_with_config(
 
     // 3. Enforce File-Level Living Wiki Header (//! at least min_module_doc_chars) for production code (Rule 1)
     if !is_test_file {
+        let mut module_doc_lines = Vec::new();
         let mut module_doc_len = 0;
         for attr in &syn_file.attrs {
             if matches!(attr.style, syn::AttrStyle::Inner(_))
@@ -190,8 +198,10 @@ pub fn check_source_with_config(
                     ..
                 }) = &attr.meta
             {
+                let val = s.value();
                 // Measure actual Unicode characters, not UTF-8 bytes (prevents CJK penalty)
-                module_doc_len += s.value().trim().chars().count();
+                module_doc_len += val.trim().chars().count();
+                module_doc_lines.push(val);
             }
         }
 
@@ -201,6 +211,10 @@ pub fn check_source_with_config(
                 "Rule: AGENTS.md Rule 1 (File-Level Living Wiki Header)\nLocation: {:?}:1\nLimit: Minimum {} characters in module doc (//!)\nActual: {} characters (-{} under limit)\nAction: Every production source file must serve as a living Wiki entry detailing its purpose, responsibilities, and architecture.",
                 path, config.min_module_doc_chars, module_doc_len, under
             ));
+        }
+
+        if config.enforce_doc_schema {
+            validate_doc_schema(path, &module_doc_lines, &syn_file)?;
         }
     }
 
@@ -667,3 +681,96 @@ fn char_range(line: &str, start_byte: usize, end_byte: Option<usize>) -> usize {
         0
     }
 }
+
+/// Validates that module-level doc comments (`//!`) adhere to the Living Wiki Schema (Rule 1).
+pub fn validate_doc_schema(
+    path: &Path,
+    doc_lines: &[String],
+    syn_file: &syn::File,
+) -> Result<(), String> {
+    let doc_text = doc_lines.join("\n");
+
+    // 1. Enforce ## Overview
+    let has_overview = doc_lines.iter().any(|l| {
+        let t = l.trim();
+        t.starts_with("## Overview") || t.starts_with("# Overview")
+    });
+
+    if !has_overview {
+        return Err(format!(
+            "Rule: AGENTS.md Rule 1 (Living Wiki Schema: Missing Overview)\nLocation: {:?}:1\nRequirement: Module doc (`//!`) must contain a `## Overview` section describing its single responsibility.\nAction: Add `## Overview` followed by a concise 1-2 sentence description at the top of the file.",
+            path
+        ));
+    }
+
+    // 2. Enforce ## Search Tags with at least one `#tag`
+    let has_tags_header = doc_lines.iter().any(|l| {
+        let t = l.trim();
+        t.starts_with("## Search Tags")
+            || t.starts_with("# Search Tags")
+            || t.starts_with("## Tags")
+            || t.starts_with("# Tags")
+    });
+
+    let has_tag_keyword = doc_lines.iter().any(|l| {
+        l.split_whitespace().any(|word| {
+            let clean = word.trim_matches(|c: char| !c.is_alphanumeric() && c != '#' && c != '-' && c != '_');
+            clean.starts_with('#') && !clean.starts_with("##") && clean.len() > 1
+        })
+    });
+
+    if !has_tags_header || !has_tag_keyword {
+        return Err(format!(
+            "Rule: AGENTS.md Rule 1 (Living Wiki Schema: Missing Search Tags)\nLocation: {:?}:1\nRequirement: Module doc (`//!`) must contain a `## Search Tags` section with at least one hashtag (e.g. `#keyword`).\nAction: Add `## Search Tags` followed by deterministic hashtags (e.g. `#tag1, #tag2`) for fast grep indexing.",
+            path
+        ));
+    }
+
+    // 3. Enforce ## Submodules catalog if external submodules are declared
+    let mut external_submodules = Vec::new();
+    for item in &syn_file.items {
+        if let syn::Item::Mod(m) = item {
+            if !is_cfg_test(&m.attrs) && m.content.is_none() {
+                external_submodules.push(m.ident.to_string());
+            }
+        }
+    }
+
+    if !external_submodules.is_empty() {
+        let has_submodules_header = doc_lines.iter().any(|l| {
+            let t = l.trim();
+            t.starts_with("## Submodules")
+                || t.starts_with("# Submodules")
+                || t.starts_with("## Modules")
+                || t.starts_with("# Modules")
+                || t.starts_with("## Module Components")
+        });
+
+        if !has_submodules_header {
+            return Err(format!(
+                "Rule: AGENTS.md Rule 1 (Living Wiki Schema: Missing Submodules Catalog)\nLocation: {:?}:1\nRequirement: Module declares child submodules via `mod <name>;` but is missing a `## Submodules` catalog.\nAction: Add a `## Submodules` section with 1-line single-responsibility summaries for each child submodule.",
+                path
+            ));
+        }
+
+        for submod in &external_submodules {
+            let bracketed1 = format!("[`{}`]", submod);
+            let bracketed2 = format!("[{}]", submod);
+            let list_entry1 = format!("- {}:", submod);
+            let list_entry2 = format!("- `{}`:", submod);
+            if !doc_text.contains(&bracketed1)
+                && !doc_text.contains(&bracketed2)
+                && !doc_text.contains(&list_entry1)
+                && !doc_text.contains(&list_entry2)
+            {
+                return Err(format!(
+                    "Rule: AGENTS.md Rule 1 (Living Wiki Schema: Submodule Catalog Drift)\nLocation: {:?}:1\nRequirement: Submodule `{}` is declared via `mod {};` but not listed in the `## Submodules` catalog.\nAction: Add `- [`{}`]: 1-line single-responsibility summary` under `## Submodules`.",
+                    path, submod, submod, submod
+                ));
+            }
+        }
+    }
+
+    Ok(())
+}
+
