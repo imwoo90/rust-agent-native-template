@@ -27,9 +27,11 @@ Traditional codebases separate implementation from documentation and rely on man
 ### 1. 🛡️ Compile-Time Hard Linter (`build.rs`)
 Every `cargo check`, `cargo build`, and `cargo test` runs an automated AST/text inspection across `src/`:
 * **Rule 1: File Header Requirement**: Every non-test `.rs` file must begin with a `//!` module header of **at least 100 characters** describing its purpose, responsibility, and architecture.
-* **Rule 2: Logical Code Limit**: Active code (excluding comments and whitespace) must not exceed **10,000 characters** (~250 SLOC). Forces modular decomposition.
+* **Rule 2: Production Logical Code Limit**: Active production code (excluding comments, doc comments, and `#[cfg(test)]` modules) must not exceed **10,000 characters** (~250 SLOC). Preserves TDD incentives while forcing modular decomposition.
 * **Rule 3: Documentation Limit**: Documentation comments must not exceed **4,000 characters**. Prevents bloat and keeps context dense.
 * **Rule 4: Function Physical Limit**: Individual functions must not exceed **2,000 characters** (~40–50 lines). Enforces single responsibility and fits on a single screen/turn.
+* **Rule 5: Living LLM-Wiki: Public API Documentation**: Every public item (`pub fn`, `pub struct`, `pub enum`, `pub trait`, `pub type`, and public inherent method) must have `///` documentation comments.
+* **Rule 6: Panic-Free Production Guarantee**: Prohibits `.unwrap()` and `.expect()` in production code, mandating typed error handling (`Result<T, E>` and `?`).
 
 ### 2. 🧠 Living LLM-Wiki (`mod.rs` = `index.md`)
 * Each directory represents a cohesive module domain whose `mod.rs` serves as the `index.md` architecture catalog.

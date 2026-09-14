@@ -1,7 +1,14 @@
 use std::fs;
+use std::ops::RangeInclusive;
 use std::path::Path;
 use syn::spanned::Spanned;
 use syn::visit::Visit;
+
+// Architectural Limits (AGENTS.md Rules)
+const MIN_MODULE_DOC_CHARS: usize = 100;
+const MAX_LOGICAL_CODE_CHARS: usize = 10_000;
+const MAX_DOC_CHARS: usize = 4_000;
+const MAX_FUNCTION_CHARS: usize = 2_000;
 
 #[allow(dead_code)]
 fn main() {
@@ -47,12 +54,23 @@ pub fn check_source(path: &Path, content: &str) -> Result<(), String> {
     let syn_file = syn::parse_file(content)
         .map_err(|e| format!("Failed to parse Rust syntax in {:?}: {}", path, e))?;
 
+    let path_str = path.to_string_lossy();
+    let is_test_file = path_str.contains("test");
+
+    // Pass 1: Extract test scopes (e.g. #[cfg(test)])
+    let mut scope_collector = TestScopeCollector {
+        test_line_ranges: Vec::new(),
+    };
+    scope_collector.visit_file(&syn_file);
+
+    // Pass 2: Calculate character metrics (Rules 2 & 3)
     let lines: Vec<&str> = content.lines().collect();
-    let mut logical_code_chars = 0;
+    let mut prod_logical_code_chars = 0;
     let mut doc_chars = 0;
     let mut in_block_comment = false;
 
-    for line in &lines {
+    for (line_idx, line) in lines.iter().enumerate() {
+        let line_num = line_idx + 1; // 1-indexed
         let trimmed = line.trim();
         let line_len = line.len() + 1; // Count raw line length + newline character
 
@@ -81,34 +99,43 @@ pub fn check_source(path: &Path, content: &str) -> Result<(), String> {
             continue;
         }
 
-        logical_code_chars += line_len;
+        // Check if this line is part of a #[cfg(test)] or test file
+        let is_in_test_scope = is_test_file
+            || scope_collector
+                .test_line_ranges
+                .iter()
+                .any(|r| r.contains(&line_num));
+
+        if !is_in_test_scope {
+            prod_logical_code_chars += line_len;
+        }
     }
 
-    // 1. Check logical code limit (max 10,000 characters, Rule 2)
-    if logical_code_chars > 10000 {
+    // 1. Check production logical code limit (max 10,000 characters, Rule 2)
+    if prod_logical_code_chars > MAX_LOGICAL_CODE_CHARS {
+        let over = prod_logical_code_chars - MAX_LOGICAL_CODE_CHARS;
         return Err(format!(
-            "File {:?} has {} logical code characters, exceeding the 10,000-character limit (AGENTS.md Rule 2).\nAction: Refactor by splitting responsibilities into smaller submodules.",
-            path, logical_code_chars
+            "Rule: AGENTS.md Rule 2 (Production Logical Code Limit)\nLocation: {:?}\nLimit: Maximum {} characters (excluding tests & comments)\nActual: {} characters (+{} over limit)\nAction: Refactor by splitting responsibilities into cohesive submodules.",
+            path, MAX_LOGICAL_CODE_CHARS, prod_logical_code_chars, over
         ));
     }
 
     // 2. Check documentation character limit (max 4,000 characters, Rule 3)
-    if doc_chars > 4000 {
+    if doc_chars > MAX_DOC_CHARS {
+        let over = doc_chars - MAX_DOC_CHARS;
         return Err(format!(
-            "File {:?} has {} documentation/comment characters, exceeding the 4,000-character limit (AGENTS.md Rule 3).\nAction: Keep documentation concise to maintain high signal-to-noise ratio for LLM context.",
-            path, doc_chars
+            "Rule: AGENTS.md Rule 3 (File Documentation Limit)\nLocation: {:?}\nLimit: Maximum {} characters\nActual: {} characters (+{} over limit)\nAction: Keep documentation concise to maintain high signal-to-noise ratio for LLM context.",
+            path, MAX_DOC_CHARS, doc_chars, over
         ));
     }
 
     // 3. Enforce File-Level Documentation (//! at least 100 characters) for production code (Rule 1)
-    let path_str = path.to_string_lossy();
-    let is_test = path_str.contains("test");
-
-    if !is_test {
+    if !is_test_file {
         let mut module_doc_len = 0;
         for attr in &syn_file.attrs {
-            if matches!(attr.style, syn::AttrStyle::Inner(_)) && attr.path().is_ident("doc") {
-                if let syn::Meta::NameValue(syn::MetaNameValue {
+            if matches!(attr.style, syn::AttrStyle::Inner(_))
+                && attr.path().is_ident("doc")
+                && let syn::Meta::NameValue(syn::MetaNameValue {
                     value:
                         syn::Expr::Lit(syn::ExprLit {
                             lit: syn::Lit::Str(s),
@@ -116,24 +143,26 @@ pub fn check_source(path: &Path, content: &str) -> Result<(), String> {
                         }),
                     ..
                 }) = &attr.meta
-                {
-                    module_doc_len += s.value().trim().len();
-                }
+            {
+                module_doc_len += s.value().trim().len();
             }
         }
 
-        if module_doc_len < 100 {
+        if module_doc_len < MIN_MODULE_DOC_CHARS {
+            let under = MIN_MODULE_DOC_CHARS - module_doc_len;
             return Err(format!(
-                "File {:?} has a module/file level documentation comment (//!) of only {} characters (minimum 100 characters required, AGENTS.md Rule 1).\nAction: Every production source file must serve as a living Wiki entry detailing its purpose, responsibilities, and architecture.",
-                path, module_doc_len
+                "Rule: AGENTS.md Rule 1 (File-Level Living Wiki Header)\nLocation: {:?}:1\nLimit: Minimum {} characters in module doc (//!)\nActual: {} characters (-{} under limit)\nAction: Every production source file must serve as a living Wiki entry detailing its purpose, responsibilities, and architecture.",
+                path, MIN_MODULE_DOC_CHARS, module_doc_len, under
             ));
         }
     }
 
-    // 4. Check function character size (max 2,000 physical characters, Rule 4)
-    let mut visitor = FunctionChecker {
+    // 4. Pass 3: AST Inspection for Rules 4, 5, 6
+    let mut visitor = AgentNativeAstChecker {
         path,
         source_lines: &lines,
+        is_test_file,
+        in_test_scope: is_test_file,
         errors: Vec::new(),
     };
     visitor.visit_file(&syn_file);
@@ -145,13 +174,47 @@ pub fn check_source(path: &Path, content: &str) -> Result<(), String> {
     Ok(())
 }
 
-struct FunctionChecker<'a> {
+/// Collects line ranges for items annotated with `#[cfg(test)]`.
+struct TestScopeCollector {
+    test_line_ranges: Vec<RangeInclusive<usize>>,
+}
+
+impl<'ast> Visit<'ast> for TestScopeCollector {
+    fn visit_item(&mut self, node: &'ast syn::Item) {
+        let is_test = match node {
+            syn::Item::Mod(m) => is_cfg_test(&m.attrs),
+            syn::Item::Fn(f) => is_cfg_test(&f.attrs),
+            syn::Item::Struct(s) => is_cfg_test(&s.attrs),
+            syn::Item::Enum(e) => is_cfg_test(&e.attrs),
+            syn::Item::Const(c) => is_cfg_test(&c.attrs),
+            syn::Item::Static(s) => is_cfg_test(&s.attrs),
+            syn::Item::Trait(t) => is_cfg_test(&t.attrs),
+            syn::Item::Impl(i) => is_cfg_test(&i.attrs),
+            _ => false,
+        };
+
+        if is_test {
+            let span = node.span();
+            let start_line = span.start().line.max(1);
+            let end_line = span.end().line;
+            if start_line <= end_line {
+                self.test_line_ranges.push(start_line..=end_line);
+            }
+        }
+
+        syn::visit::visit_item(self, node);
+    }
+}
+
+struct AgentNativeAstChecker<'a> {
     path: &'a Path,
     source_lines: &'a [&'a str],
+    is_test_file: bool,
+    in_test_scope: bool,
     errors: Vec<String>,
 }
 
-impl<'a> FunctionChecker<'a> {
+impl<'a> AgentNativeAstChecker<'a> {
     fn check_fn_size(
         &mut self,
         fn_name: &str,
@@ -166,35 +229,149 @@ impl<'a> FunctionChecker<'a> {
         }
 
         let fn_chars = calculate_span_chars(self.source_lines, start, end);
-        if fn_chars > 2000 {
+        if fn_chars > MAX_FUNCTION_CHARS {
+            let over = fn_chars - MAX_FUNCTION_CHARS;
             self.errors.push(format!(
-                "Function at {:?}:{} exceeds the 2,000-character limit ({} characters, AGENTS.md Rule 4).\nFunction: {}\nAction: Refactor into smaller, single-responsibility helper functions.",
-                self.path, start.line, fn_chars, fn_name
+                "Rule: AGENTS.md Rule 4 (Function Physical Size Limit)\nLocation: {:?}:{}\nItem: Function `{}`\nLimit: Maximum {} characters\nActual: {} characters (+{} over limit)\nAction: Refactor into smaller, single-responsibility helper functions.",
+                self.path, start.line, fn_name, MAX_FUNCTION_CHARS, fn_chars, over
             ));
+        }
+    }
+
+    fn check_public_doc(
+        &mut self,
+        item_type: &str,
+        name: &str,
+        vis: &syn::Visibility,
+        attrs: &[syn::Attribute],
+        span: proc_macro2::Span,
+    ) {
+        if self.in_test_scope || self.is_test_file {
+            return;
+        }
+
+        if matches!(vis, syn::Visibility::Public(_)) {
+            let has_doc = attrs.iter().any(|attr| {
+                matches!(attr.style, syn::AttrStyle::Outer) && attr.path().is_ident("doc")
+            });
+
+            if !has_doc {
+                self.errors.push(format!(
+                    "Rule: AGENTS.md Rule 5 (Living LLM-Wiki: Public API Documentation)\nLocation: {:?}:{}\nItem: Public {} `{}`\nConstraint: Every public interface must include documentation comments (///)\nAction: Add doc comments explaining purpose, parameters, return values, and executable doctests.",
+                    self.path, span.start().line, item_type, name
+                ));
+            }
         }
     }
 }
 
-impl<'ast, 'a> Visit<'ast> for FunctionChecker<'a> {
+impl<'ast, 'a> Visit<'ast> for AgentNativeAstChecker<'a> {
+    fn visit_item_mod(&mut self, node: &'ast syn::ItemMod) {
+        let was_in_test = self.in_test_scope;
+        if is_cfg_test(&node.attrs) {
+            self.in_test_scope = true;
+        }
+        syn::visit::visit_item_mod(self, node);
+        self.in_test_scope = was_in_test;
+    }
+
     fn visit_item_fn(&mut self, node: &'ast syn::ItemFn) {
+        let was_in_test = self.in_test_scope;
+        if is_cfg_test(&node.attrs) {
+            self.in_test_scope = true;
+        }
+
         let fn_name = node.sig.ident.to_string();
+        self.check_public_doc(
+            "function",
+            &fn_name,
+            &node.vis,
+            &node.attrs,
+            node.sig.ident.span(),
+        );
         self.check_fn_size(&fn_name, node.sig.span(), node.block.span());
+
         syn::visit::visit_item_fn(self, node);
+        self.in_test_scope = was_in_test;
+    }
+
+    fn visit_item_struct(&mut self, node: &'ast syn::ItemStruct) {
+        let name = node.ident.to_string();
+        self.check_public_doc("struct", &name, &node.vis, &node.attrs, node.ident.span());
+        syn::visit::visit_item_struct(self, node);
+    }
+
+    fn visit_item_enum(&mut self, node: &'ast syn::ItemEnum) {
+        let name = node.ident.to_string();
+        self.check_public_doc("enum", &name, &node.vis, &node.attrs, node.ident.span());
+        syn::visit::visit_item_enum(self, node);
+    }
+
+    fn visit_item_trait(&mut self, node: &'ast syn::ItemTrait) {
+        let name = node.ident.to_string();
+        self.check_public_doc("trait", &name, &node.vis, &node.attrs, node.ident.span());
+        syn::visit::visit_item_trait(self, node);
+    }
+
+    fn visit_item_type(&mut self, node: &'ast syn::ItemType) {
+        let name = node.ident.to_string();
+        self.check_public_doc(
+            "type alias",
+            &name,
+            &node.vis,
+            &node.attrs,
+            node.ident.span(),
+        );
+        syn::visit::visit_item_type(self, node);
     }
 
     fn visit_impl_item_fn(&mut self, node: &'ast syn::ImplItemFn) {
         let fn_name = node.sig.ident.to_string();
+        self.check_public_doc(
+            "method",
+            &fn_name,
+            &node.vis,
+            &node.attrs,
+            node.sig.ident.span(),
+        );
         self.check_fn_size(&fn_name, node.sig.span(), node.block.span());
         syn::visit::visit_impl_item_fn(self, node);
     }
 
     fn visit_trait_item_fn(&mut self, node: &'ast syn::TraitItemFn) {
+        let fn_name = node.sig.ident.to_string();
         if let Some(block) = &node.default {
-            let fn_name = node.sig.ident.to_string();
             self.check_fn_size(&fn_name, node.sig.span(), block.span());
         }
         syn::visit::visit_trait_item_fn(self, node);
     }
+
+    fn visit_expr_method_call(&mut self, node: &'ast syn::ExprMethodCall) {
+        if !self.in_test_scope && !self.is_test_file {
+            let method = node.method.to_string();
+            if method == "unwrap" || method == "expect" {
+                self.errors.push(format!(
+                    "Rule: AGENTS.md Rule 6 (Panic-Free Production Code Guarantee)\nLocation: {:?}:{}\nItem: Prohibited method call `.{method}()`\nConstraint: Production code must never panic at runtime\nAction: Use typed error handling (Result<T, E> and the '?' operator) instead of crashing at runtime.",
+                    self.path, node.method.span().start().line
+                ));
+            }
+        }
+        syn::visit::visit_expr_method_call(self, node);
+    }
+}
+
+fn is_cfg_test(attrs: &[syn::Attribute]) -> bool {
+    attrs.iter().any(|attr| {
+        if attr.path().is_ident("test") {
+            return true;
+        }
+        if attr.path().is_ident("cfg")
+            && let syn::Meta::List(list) = &attr.meta
+        {
+            return list.tokens.to_string().contains("test");
+        }
+        false
+    })
 }
 
 fn calculate_span_chars(

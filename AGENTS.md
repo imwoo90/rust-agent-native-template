@@ -26,8 +26,9 @@ To keep files compact, modular, and optimized for LLM context windows, strict ar
 
 1. **Rule 1: File-Level Documentation Header (Min 100 Characters)**:
    * Every non-test production `.rs` file must begin with a file-level doc comment (`//!`) of **at least 100 characters** describing its purpose, responsibilities, and architecture.
-2. **Rule 2: File Logical Code Limit (Max 10,000 Characters)**:
-   * The total character count of active executable code lines (excluding comments, doc comments, and empty lines) must be **under 10,000 characters** (approx. 200–300 lines of SLOC).
+2. **Rule 2: Production Logical Code Limit (Max 10,000 Characters)**:
+   * The total character count of active production code lines (excluding comments, doc comments, empty lines, and `#[cfg(test)]` blocks) must be **under 10,000 characters** (approx. 200–300 lines of SLOC).
+   * Note: Comprehensive unit tests in `#[cfg(test)]` do not count against this limit, fully preserving TDD incentives.
    * Exceeding this limit indicates bloated responsibility; split into cohesive submodules.
 3. **Rule 3: File Documentation Limit (Max 4,000 Characters)**:
    * The total character count of documentation comments (`//`, `///`, `//!`, `/* */`) must be **under 4,000 characters** (approx. 50–80 lines).
@@ -35,6 +36,10 @@ To keep files compact, modular, and optimized for LLM context windows, strict ar
 4. **Rule 4: Function Physical Size Limit (Max 2,000 Characters)**:
    * A single function (including its signature, body, comments, and braces) must be **under 2,000 characters** (approx. 40–50 physical lines).
    * Ensures every function fits cleanly on a single screen or within a single context window turn.
+5. **Rule 5: Living LLM-Wiki: Public API Documentation Required**:
+   * Every public interface (`pub fn`, `pub struct`, `pub enum`, `pub trait`, `pub type`, and public inherent method) must include outer doc comments (`///`) explaining its contract, parameters, and executable doctests.
+6. **Rule 6: Panic-Free Production Code Guarantee**:
+   * Prohibits `.unwrap()` and `.expect()` in production code. All production logic must propagate errors via typed `Result<T, E>` and the `?` operator. Non-panicking alternatives (`unwrap_or`, `unwrap_or_default`, `unwrap_or_else`) and test-scope unwraps are allowed.
 
 ---
 
