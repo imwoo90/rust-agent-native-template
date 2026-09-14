@@ -57,7 +57,7 @@ pub fn load_config(root_dir: &Path) -> LinterConfig {
 
         if let Some((key, val)) = trimmed.split_once('=') {
             let key = key.trim();
-            let val = val.trim().trim_matches('"');
+            let val = val.split('#').next().unwrap_or("").trim().trim_matches('"');
             if let Ok(num) = val.parse::<usize>() {
                 match key {
                     "min_module_doc_chars" => config.min_module_doc_chars = num,
@@ -79,6 +79,7 @@ pub fn load_config(root_dir: &Path) -> LinterConfig {
 pub fn run_linter() {
     println!("cargo:rerun-if-changed=src");
     println!("cargo:rerun-if-changed=.agent-lint.toml");
+    println!("cargo:rerun-if-changed=build_linter.rs");
 
     let config = load_config(Path::new("."));
     let src_dir = Path::new("src");
@@ -495,10 +496,23 @@ fn scan_code_and_comments(
 
         // Check raw string start in actual code
         if trimmed.contains("r#\"") || trimmed.contains("r##\"") {
-            if !(trimmed.ends_with("\"#")
-                || trimmed.ends_with("\"##")
-                || (trimmed.contains("\"#") && !trimmed.starts_with("r#\"")))
-            {
+            let open_pos = match (trimmed.find("r##\""), trimmed.find("r#\"")) {
+                (Some(p2), Some(p1)) => Some(p2.min(p1)),
+                (Some(p2), None) => Some(p2),
+                (None, Some(p1)) => Some(p1),
+                (None, None) => None,
+            };
+            let close_pos = match (trimmed.rfind("\"##"), trimmed.rfind("\"#")) {
+                (Some(p2), Some(p1)) => Some(p2.max(p1)),
+                (Some(p2), None) => Some(p2),
+                (None, Some(p1)) => Some(p1),
+                (None, None) => None,
+            };
+            let is_single_line = match (open_pos, close_pos) {
+                (Some(o), Some(c)) => c > o,
+                _ => false,
+            };
+            if !is_single_line {
                 in_raw_string = true;
             }
             if !is_in_test_scope {

@@ -111,7 +111,7 @@ EOF
 
     echo "--> Writing pristine tests/integration_test.rs..."
     cat <<EOF > tests/integration_test.rs
-#![allow(missing_docs)]
+#![allow(missing_docs, clippy::unwrap_used, clippy::expect_used)]
 
 // Integration test suite verifying crate initialization and public API boundaries.
 

@@ -18,6 +18,7 @@ This repository adheres to the **Agent-Native** architecture and compiler-enforc
 3. **Public API Contracts & Panic-Free Guarantee (`Cargo.toml [lints]`)**:
    - Every public item (`pub fn`, `pub struct`, `pub enum`, `pub trait`, `pub type`, and public inherent method) must have `///` doc comments with executable doctests (`missing_docs = "deny"`).
    - **Never** use `.unwrap()` or `.expect()` in production code. Use typed `Result<T, E>` and `?` error propagation (`clippy::unwrap_used = "deny"`).
+   - *Test Exception*: In tests (`tests/` or `#[cfg(test)]`), you may annotate `#![allow(clippy::unwrap_used, clippy::expect_used)]` or return `Result<(), Box<dyn std::error::Error>>` to streamline assertions.
 
 4. **Required Verification Suite**:
    Never consider a task complete without executing and passing:

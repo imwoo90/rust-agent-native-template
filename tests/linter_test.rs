@@ -3,6 +3,7 @@
 #[path = "../build_linter.rs"]
 mod linter;
 
+use std::fs;
 use std::path::Path;
 
 #[test]
@@ -774,5 +775,51 @@ pub fn generate_data() {
     let err = res.unwrap_err();
     assert!(err.contains("Rule 2"), "Error was: {}", err);
 }
+
+#[test]
+fn test_load_config_with_inline_comments() {
+    let temp_dir = std::env::temp_dir().join(format!("agent_lint_test_comment_{}", std::process::id()));
+    let _ = fs::create_dir_all(&temp_dir);
+    let config_path = temp_dir.join(".agent-lint.toml");
+    let content = r#"
+# Agent lint configuration with inline comments
+[limits]
+min_module_doc_chars = 150 # Custom increased minimum module header
+max_logical_code_chars = 12000 # Higher ceiling for code
+max_inline_test_chars = 6000 # Generous test limit
+max_doc_chars = 5000 # Rich doc limit
+max_function_chars = 2500 # Slightly bigger function
+"#;
+    fs::write(&config_path, content).unwrap();
+
+    let cfg = linter::load_config(&temp_dir);
+    let _ = fs::remove_dir_all(&temp_dir);
+
+    assert_eq!(cfg.min_module_doc_chars, 150);
+    assert_eq!(cfg.max_logical_code_chars, 12_000);
+    assert_eq!(cfg.max_inline_test_chars, 6_000);
+    assert_eq!(cfg.max_doc_chars, 5_000);
+    assert_eq!(cfg.max_function_chars, 2_500);
+}
+
+#[test]
+fn test_single_line_raw_string_does_not_leak_raw_string_state() {
+    // Verifies that a line starting with a raw string and ending on the same line
+    // (e.g. `r#"hello"#.to_string();`) does not leak `in_raw_string = true`
+    // into subsequent lines, ensuring inline comments on subsequent lines are recognized.
+    let source = r##"//! # Single Line Raw String Test Module
+//!
+//! Valid header with more than 100 characters to pass rule 1 check successfully.
+
+pub fn run_test() {
+    let _s = r#"hello"#.to_string();
+    // This is an inline doc comment that must be counted as documentation, not code!
+    let _x = 42;
+}
+"##;
+    let res = linter::check_source(Path::new("src/raw_leak.rs"), source);
+    assert!(res.is_ok(), "Expected single-line raw string to pass cleanly: {:?}", res);
+}
+
 
 

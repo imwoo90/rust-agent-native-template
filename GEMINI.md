@@ -14,7 +14,7 @@ This project follows the **Agent-Native** architecture and compiler-enforced qua
    - **Rule 2b**: Inline unit tests (`#[cfg(test)]`) in `src/` must not exceed 5,000 characters (move larger test suites to `tests/`).
    - **Rule 3**: Documentation comments must not exceed 4,000 characters per file.
    - **Rule 4**: Individual functions (production or test) must not exceed 2,000 characters.
-   - **Package Lints**: All public interfaces require `///` doc comments (`missing_docs = "deny"`), and `.unwrap()`/`.expect()` are prohibited in production (`clippy::unwrap_used = "deny"`).
+   - **Package Lints**: All public interfaces require `///` doc comments (`missing_docs = "deny"`), and `.unwrap()`/`.expect()` are prohibited in production (`clippy::unwrap_used = "deny"`). Tests may use `#![allow(clippy::unwrap_used, clippy::expect_used)]`.
    - **Anti-Code-Golfing**: Never shorten variable names or cram code to bypass limits; decompose into helpers.
 
 3. **Verification**:
