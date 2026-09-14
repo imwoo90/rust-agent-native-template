@@ -54,9 +54,11 @@ Every `cargo check`, `cargo build`, and `cargo test` runs an automated AST inspe
 
 ```text
 rust-agent-native-template/
+├── .cursor/
+│   └── rules/agent-native.mdc     # Cursor IDE rules bridge
 ├── .github/
-│   └── workflows/
-│       └── ci.yml                 # CI: formatting, linter, tests, intra-doc links
+│   ├── workflows/ci.yml           # CI: formatting, linter, tests, intra-doc links
+│   └── copilot-instructions.md    # GitHub Copilot instructions bridge
 ├── .vscode/
 │   └── settings.json              # IDE real-time Clippy on save
 ├── scripts/
@@ -70,7 +72,9 @@ rust-agent-native-template/
 ├── tests/
 │   ├── integration_test.rs        # External integration test suite
 │   └── linter_test.rs             # Compile-time AST linter TDD verification suite
-├── AGENTS.md                      # AI Agent & Developer collaboration standards
+├── AGENTS.md                      # AI Agent & Developer collaboration standards (SSOT)
+├── CLAUDE.md                      # Claude Code bridge (points to AGENTS.md)
+├── GEMINI.md                      # Antigravity / Gemini bridge (points to AGENTS.md)
 ├── build.rs                       # Compile-time hard linter engine (Rules 1-4)
 ├── Cargo.toml                     # Cargo manifest ([lints] table and dependencies)
 ├── cargo-generate.toml            # cargo-generate template configuration

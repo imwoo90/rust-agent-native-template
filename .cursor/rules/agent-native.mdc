@@ -1,0 +1,24 @@
+---
+description: Agent-Native Rust architectural standards, character budgets, and compiler quality rules
+globs: src/**/*.rs, tests/**/*.rs, Cargo.toml
+alwaysApply: true
+---
+
+# Agent-Native Rust Guidelines
+
+This codebase strictly enforces the **Agent-Native** standards defined in `AGENTS.md`.
+
+## Mandatory Constraints (Enforced at Compile-Time)
+
+- **Living Wiki File Header**: Every non-test source file must begin with `//!` of at least 100 characters detailing purpose, responsibilities, and architecture (Rule 1).
+- **Production Code Limit**: Keep active production code lines under 10,000 characters per file (Rule 2). Decompose into submodules when approaching this threshold. Unit tests in `#[cfg(test)]` do not count against this limit.
+- **Documentation Limit**: Keep comments under 4,000 characters per file (Rule 3).
+- **Function Physical Limit**: Every function must be under 2,000 characters (~40–50 lines) (Rule 4).
+- **Public API Documentation**: All public items must have `///` doc comments with executable doctests (`missing_docs = "deny"`).
+- **Panic-Free Production**: Never call `.unwrap()` or `.expect()` in production code. Use typed `Result<T, E>` and `?` operator (`clippy::unwrap_used = "deny"`).
+
+## Verification Workflow
+Before reporting any task complete, run:
+```bash
+cargo check && cargo test --all-targets && cargo test --doc && cargo clippy --all-targets
+```
