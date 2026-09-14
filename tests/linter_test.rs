@@ -217,9 +217,9 @@ impl Engine {{
 }
 
 #[test]
-fn test_escape_hatch_allows_large_functions() {
+fn test_escape_hatch_disallowed_and_fails_rule_4() {
     // Verifies that functions annotated with #[allow(clippy::too_many_lines)]
-    // can exceed the 2,000-character limit (e.g. for complex Dioxus rsx! components or state machines).
+    // can NO LONGER exceed the 2,000-character limit, closing the AI agent escape loophole.
     let mut big_body = String::new();
     for i in 0..100 {
         big_body.push_str(&format!("        let _variable_{} = {};\n", i, i));
@@ -228,7 +228,7 @@ fn test_escape_hatch_allows_large_functions() {
     let source = format!(
         r#"//! # Escape Hatch Test Module
 //!
-//! Verifies that the escape hatch attribute allows complex functions to exceed limits when explicitly intended.
+//! Verifies that the escape hatch attribute no longer allows complex functions to exceed limits.
 
 pub struct MacroUi;
 
@@ -244,10 +244,12 @@ impl MacroUi {{
 
     let res = linter::check_source(Path::new("src/ui.rs"), &source);
     assert!(
-        res.is_ok(),
-        "Expected function with escape hatch to pass: {:?}",
+        res.is_err(),
+        "Expected function with allow attribute to fail Rule 4: {:?}",
         res
     );
+    let err = res.unwrap_err();
+    assert!(err.contains("Rule 4"), "Error was: {}", err);
 }
 
 #[test]
@@ -383,7 +385,7 @@ pub fn run_korean_task() -> bool {{
 }
 
 #[test]
-fn test_impl_level_escape_hatch_inherits_to_inner_methods() {
+fn test_impl_level_escape_hatch_disallowed_and_fails_rule_4() {
     let mut big_body = String::new();
     for i in 0..100 {
         big_body.push_str(&format!("        let _variable_{} = {};\n", i, i));
@@ -392,7 +394,7 @@ fn test_impl_level_escape_hatch_inherits_to_inner_methods() {
     let source = format!(
         r#"//! # Impl Escape Hatch Test Module
 //!
-//! Verifies that `#[allow(clippy::too_many_lines)]` placed on an `impl` block inherits to all methods.
+//! Verifies that `#[allow(clippy::too_many_lines)]` placed on an `impl` block does not bypass Rule 4.
 
 pub struct MacroUi;
 
@@ -412,10 +414,12 @@ impl MacroUi {{
 
     let res = linter::check_source(Path::new("src/impl_ui.rs"), &source);
     assert!(
-        res.is_ok(),
-        "Expected impl-level escape hatch to inherit to inner methods: {:?}",
+        res.is_err(),
+        "Expected impl-level allow attribute to fail Rule 4: {:?}",
         res
     );
+    let err = res.unwrap_err();
+    assert!(err.contains("Rule 4"), "Error was: {}", err);
 }
 
 #[test]
@@ -619,7 +623,7 @@ mod tests {{
         big_tests
     );
 
-    let res = linter::check_source(Path::new("src/bloated_tests.rs"), &source);
+    let res = linter::check_source(Path::new("src/bloated_production.rs"), &source);
     assert!(
         res.is_err(),
         "Expected inline tests exceeding 5,000 chars to fail Rule 2b: {:?}",
@@ -820,6 +824,71 @@ pub fn run_test() {
     let res = linter::check_source(Path::new("src/raw_leak.rs"), source);
     assert!(res.is_ok(), "Expected single-line raw string to pass cleanly: {:?}", res);
 }
+
+#[test]
+fn test_multiline_normal_string_with_comment_markers_does_not_corrupt_counts() {
+    // Verifies that a multiline standard string ("...") containing `//` or `/*`
+    // is counted as logical code and does not get falsely identified as documentation comments.
+    let source = r#"//! # Multiline Normal String Test Module
+//!
+//! Valid header with more than 100 characters to pass rule 1 check successfully.
+
+pub fn generate_template() -> &'static str {
+    "
+    <div>
+        // This is inside a standard multiline string literal, NOT a comment!
+        <span>Hello World</span>
+    </div>
+    "
+}
+"#;
+    let res = linter::check_source(Path::new("src/multiline_str.rs"), source);
+    assert!(
+        res.is_ok(),
+        "Expected multiline normal string with comment markers to pass cleanly: {:?}",
+        res
+    );
+}
+
+#[test]
+fn test_escaped_quote_char_literal_does_not_corrupt_parser() {
+    // Verifies that character literal '\''' does not prematurely close or corrupt quote scanning.
+    let source = r#"//! # Escaped Char Literal Test Module
+//!
+//! Valid header with more than 100 characters to pass rule 1 check successfully.
+
+pub fn check_quotes() -> bool {
+    let _quote = '\'';
+    let _slash = '\\';
+    // This inline comment must be recognized cleanly as documentation
+    true
+}
+"#;
+    let res = linter::check_source(Path::new("src/escaped_char.rs"), source);
+    assert!(
+        res.is_ok(),
+        "Expected escaped char literal to pass cleanly: {:?}",
+        res
+    );
+}
+
+#[test]
+fn test_submodule_test_file_path_recognized() {
+    // Verifies that Rust submodule test paths like `src/worker/tests.rs` or `src/foo_tests.rs`
+    // are recognized as test files, while production files like `src/test_runner.rs` are NOT.
+    assert!(linter::is_path_test_file(Path::new("src/worker/tests.rs")));
+    assert!(linter::is_path_test_file(Path::new("src/worker/test.rs")));
+    assert!(linter::is_path_test_file(Path::new("src/foo_test.rs")));
+    assert!(linter::is_path_test_file(Path::new("src/foo_tests.rs")));
+    assert!(linter::is_path_test_file(Path::new("tests/integration_test.rs")));
+    assert!(linter::is_path_test_file(Path::new("benches/bench.rs")));
+
+    // Production files that merely start with "test_" or contain "test" must NOT be exempt!
+    assert!(!linter::is_path_test_file(Path::new("src/test_runner.rs")));
+    assert!(!linter::is_path_test_file(Path::new("src/contest.rs")));
+    assert!(!linter::is_path_test_file(Path::new("src/attestation.rs")));
+}
+
 
 
 

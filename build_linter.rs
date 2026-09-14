@@ -136,9 +136,6 @@ pub fn check_source_with_config(
     // Check if the file is an integration test or benchmark file
     let is_test_file = is_path_test_file(path);
 
-    // Check if the entire file has an escape hatch attribute (e.g. macro-heavy UI / generated file)
-    let file_has_skip = has_skip_attribute(&syn_file.attrs);
-
     // Pass 1: Extract test scopes (e.g. #[cfg(test)]) to preserve TDD incentives
     let mut scope_collector = TestScopeCollector {
         test_line_ranges: Vec::new(),
@@ -151,26 +148,26 @@ pub fn check_source_with_config(
         scan_code_and_comments(&lines, is_test_file, &scope_collector.test_line_ranges);
 
     // 1. Check production logical code limit (Rule 2)
-    if !file_has_skip && prod_logical_code_chars > config.max_logical_code_chars {
+    if prod_logical_code_chars > config.max_logical_code_chars {
         let over = prod_logical_code_chars - config.max_logical_code_chars;
         return Err(format!(
-            "Rule: AGENTS.md Rule 2 (Production Logical Code Limit)\nLocation: {:?}\nLimit: Maximum {} characters (excluding tests & comments)\nActual: {} characters (+{} over limit)\nAction: Refactor by splitting responsibilities into cohesive submodules, or use #![allow(clippy::too_many_lines)] for macro-heavy suites.",
+            "Rule: AGENTS.md Rule 2 (Production Logical Code Limit)\nLocation: {:?}\nLimit: Maximum {} characters (excluding tests & comments)\nActual: {} characters (+{} over limit)\nAction: Refactor by splitting responsibilities into cohesive submodules. To adjust project ceilings, edit `.agent-lint.toml`.",
             path, config.max_logical_code_chars, prod_logical_code_chars, over
         ));
     }
 
     // 1b. Check inline unit test limit in src/ (Rule 2b)
-    if !is_test_file && !file_has_skip && inline_test_chars > config.max_inline_test_chars {
+    if !is_test_file && inline_test_chars > config.max_inline_test_chars {
         let over = inline_test_chars - config.max_inline_test_chars;
         let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("module");
         return Err(format!(
-            "Rule: AGENTS.md Rule 2b (Inline Unit Test Limit)\nLocation: {:?}\nLimit: Maximum {} characters for inline tests in src/\nActual: {} characters (+{} over limit)\nAction: Move complex or integration tests to the root `tests/` directory (e.g. tests/{}_test.rs) to keep production files compact for LLM context windows.",
-            path, config.max_inline_test_chars, inline_test_chars, over, stem
+            "Rule: AGENTS.md Rule 2b (Inline Unit Test Limit)\nLocation: {:?}\nLimit: Maximum {} characters for inline tests in src/\nActual: {} characters (+{} over limit)\nAction: Move integration tests to the root `tests/` directory (e.g. tests/{}_test.rs), or extract private unit tests into a submodule file (e.g. src/{}/tests.rs or src/{}_tests.rs) to preserve encapsulation and keep production files compact for LLM context windows.",
+            path, config.max_inline_test_chars, inline_test_chars, over, stem, stem, stem
         ));
     }
 
     // 2. Check documentation character limit (Rule 3)
-    if !file_has_skip && doc_chars > config.max_doc_chars {
+    if doc_chars > config.max_doc_chars {
         let over = doc_chars - config.max_doc_chars;
         return Err(format!(
             "Rule: AGENTS.md Rule 3 (File Documentation Limit)\nLocation: {:?}\nLimit: Maximum {} characters\nActual: {} characters (+{} over limit)\nAction: Keep documentation concise to maintain high signal-to-noise ratio for LLM context.",
@@ -179,7 +176,7 @@ pub fn check_source_with_config(
     }
 
     // 3. Enforce File-Level Living Wiki Header (//! at least min_module_doc_chars) for production code (Rule 1)
-    if !is_test_file && !file_has_skip {
+    if !is_test_file {
         let mut module_doc_len = 0;
         for attr in &syn_file.attrs {
             if matches!(attr.style, syn::AttrStyle::Inner(_))
@@ -208,13 +205,12 @@ pub fn check_source_with_config(
     }
 
     // 4. Pass 3: AST Inspection for Function Physical Size (Rule 4)
-    if !file_has_skip && !is_test_file {
+    if !is_test_file {
         let mut visitor = FunctionSizeChecker {
             path,
             source_lines: &lines,
             is_test_file,
             max_function_chars: config.max_function_chars,
-            current_impl_has_skip: false,
             errors: Vec::new(),
         };
         visitor.visit_file(&syn_file);
@@ -237,28 +233,10 @@ pub fn is_path_test_file(path: &Path) -> bool {
 
     let is_test_filename = path.file_name().is_some_and(|f| {
         let name = f.to_string_lossy();
-        name == "test.rs" || name.ends_with("_test.rs") || name.starts_with("test_")
+        name == "test.rs" || name == "tests.rs" || name.ends_with("_test.rs") || name.ends_with("_tests.rs")
     });
 
     in_test_dir || is_test_filename
-}
-
-/// Checks if an item or file has an escape hatch attribute (e.g. `#[allow(clippy::too_many_lines)]`).
-fn has_skip_attribute(attrs: &[syn::Attribute]) -> bool {
-    attrs.iter().any(|attr| {
-        if attr.path().is_ident("allow")
-            && let syn::Meta::List(list) = &attr.meta
-        {
-            let s = list.tokens.to_string();
-            if s.contains("too_many_lines")
-                || s.contains("clippy :: all")
-                || s.contains("clippy::all")
-            {
-                return true;
-            }
-        }
-        false
-    })
 }
 
 /// Collects line ranges for items annotated with `#[cfg(test)]` or `#[test]`.
@@ -350,7 +328,6 @@ struct FunctionSizeChecker<'a> {
     source_lines: &'a [&'a str],
     is_test_file: bool,
     max_function_chars: usize,
-    current_impl_has_skip: bool,
     errors: Vec<String>,
 }
 
@@ -362,14 +339,14 @@ impl<'a> FunctionSizeChecker<'a> {
         sig_span: proc_macro2::Span,
         body_span: proc_macro2::Span,
     ) {
-        if self.is_test_file
-            || self.current_impl_has_skip
-            || has_skip_attribute(attrs)
-        {
+        if self.is_test_file {
             return;
         }
 
-        let start = sig_span.start();
+        let start = attrs
+            .first()
+            .map(|a| a.span().start())
+            .unwrap_or_else(|| sig_span.start());
         let end = body_span.end();
 
         if start.line == 0 || end.line == 0 || start.line > self.source_lines.len() {
@@ -380,7 +357,7 @@ impl<'a> FunctionSizeChecker<'a> {
         if fn_chars > self.max_function_chars {
             let over = fn_chars - self.max_function_chars;
             self.errors.push(format!(
-                "Rule: AGENTS.md Rule 4 (Function Physical Size Limit)\nLocation: {:?}:{}\nItem: Function `{}`\nLimit: Maximum {} characters\nActual: {} characters (+{} over limit)\nAction: Refactor into smaller helper functions, or annotate with #[allow(clippy::too_many_lines)] for complex UI macros/state machines.",
+                "Rule: AGENTS.md Rule 4 (Function Physical Size Limit)\nLocation: {:?}:{}\nItem: Function `{}`\nLimit: Maximum {} characters\nActual: {} characters (+{} over limit)\nAction: Refactor into smaller helper functions. To adjust ceilings, edit `.agent-lint.toml`.",
                 self.path, start.line, fn_name, self.max_function_chars, fn_chars, over
             ));
         }
@@ -395,12 +372,7 @@ impl<'ast, 'a> Visit<'ast> for FunctionSizeChecker<'a> {
     }
 
     fn visit_item_impl(&mut self, node: &'ast syn::ItemImpl) {
-        let prev = self.current_impl_has_skip;
-        if has_skip_attribute(&node.attrs) {
-            self.current_impl_has_skip = true;
-        }
         syn::visit::visit_item_impl(self, node);
-        self.current_impl_has_skip = prev;
     }
 
     fn visit_impl_item_fn(&mut self, node: &'ast syn::ImplItemFn) {
@@ -431,6 +403,7 @@ fn scan_code_and_comments(
     let mut inline_test_chars = 0;
     let mut block_comment_depth = 0;
     let mut in_raw_string = false;
+    let mut in_normal_string = false;
 
     for (line_idx, line) in lines.iter().enumerate() {
         let line_num = line_idx + 1; // 1-indexed
@@ -469,7 +442,28 @@ fn scan_code_and_comments(
             continue;
         }
 
-        // Line comments MUST be evaluated BEFORE raw string markers
+        // If line starts while inside a multiline normal string, process string content
+        if in_normal_string {
+            let (slash_pos, new_in_string) = find_inline_comment(trimmed, in_normal_string);
+            in_normal_string = new_in_string;
+            if let Some(pos) = slash_pos {
+                let code_part = trimmed[..pos].trim();
+                let comment_part = &trimmed[pos..];
+                if !is_in_test_scope {
+                    prod_logical_code_chars += code_part.chars().count() + 1;
+                    doc_chars += comment_part.chars().count();
+                } else if !is_test_file {
+                    inline_test_chars += line_char_count;
+                }
+            } else if !is_in_test_scope {
+                prod_logical_code_chars += line_char_count;
+            } else if !is_test_file {
+                inline_test_chars += line_char_count;
+            }
+            continue;
+        }
+
+        // Line comments MUST be evaluated BEFORE raw string markers (when outside strings)
         if trimmed.starts_with("//") {
             if !is_in_test_scope {
                 doc_chars += line_char_count;
@@ -524,7 +518,9 @@ fn scan_code_and_comments(
         }
 
         // Normal line: if line contains inline comment `//` outside of quotes, split counts
-        if let Some(slash_pos) = find_inline_comment(trimmed) {
+        let (slash_pos, new_in_string) = find_inline_comment(trimmed, false);
+        in_normal_string = new_in_string;
+        if let Some(slash_pos) = slash_pos {
             let code_part = trimmed[..slash_pos].trim();
             let comment_part = &trimmed[slash_pos..];
             if !is_in_test_scope {
@@ -544,30 +540,41 @@ fn scan_code_and_comments(
 }
 
 /// Helper to parse character literal byte length starting with `'`.
-/// Returns Some(len) if it is a valid char literal (e.g. `'c'`, `'\n'`).
+/// Returns Some(len) if it is a valid char literal (e.g. `'c'`, `'\n'`, `'\\''`).
 /// Returns None if it is a lifetime (e.g. `'a`, `'static`, `'_`).
 fn parse_char_literal_len(rem: &str) -> Option<usize> {
     if !rem.starts_with('\'') {
         return None;
     }
-    let mut chars = rem[1..].chars();
-    let first = chars.next()?;
+    let mut chars = rem[1..].char_indices();
+    let (_, first) = chars.next()?;
     if first == '\\' {
-        let mut byte_len = 2; // '\'' + '\\'
-        for c in chars {
-            byte_len += c.len_utf8();
-            if c == '\'' {
-                return Some(byte_len);
+        let (_, esc) = chars.next()?;
+        if esc == 'x' {
+            chars.next()?; // hex 1
+            chars.next()?; // hex 2
+        } else if esc == 'u' {
+            let (_, open) = chars.next()?;
+            if open != '{' {
+                return None;
             }
-            if byte_len > 12 {
-                break;
+            loop {
+                let (_, c) = chars.next()?;
+                if c == '}' {
+                    break;
+                }
             }
+        }
+        // Now expect the closing quote
+        let (idx, close) = chars.next()?;
+        if close == '\'' {
+            return Some(1 + idx + close.len_utf8());
         }
         None
     } else if first != '\'' {
-        let second = chars.next()?;
+        let (idx, second) = chars.next()?;
         if second == '\'' {
-            Some(1 + first.len_utf8() + 1)
+            Some(1 + idx + second.len_utf8())
         } else {
             None
         }
@@ -576,9 +583,9 @@ fn parse_char_literal_len(rem: &str) -> Option<usize> {
     }
 }
 
-/// Finds the start position of an inline `//` comment that is not inside quotes.
-fn find_inline_comment(line: &str) -> Option<usize> {
-    let mut in_string = false;
+/// Finds the start position of an inline `//` comment that is not inside quotes,
+/// and tracks multiline string state across lines.
+fn find_inline_comment(line: &str, mut in_string: bool) -> (Option<usize>, bool) {
     let mut chars = line.char_indices().peekable();
 
     while let Some((idx, ch)) = chars.next() {
@@ -605,10 +612,10 @@ fn find_inline_comment(line: &str) -> Option<usize> {
             && let Some(&(_, next_ch)) = chars.peek()
             && next_ch == '/'
         {
-            return Some(idx);
+            return (Some(idx), in_string);
         }
     }
-    None
+    (None, in_string)
 }
 
 fn calculate_span_chars(
