@@ -107,9 +107,8 @@ pub fn check_source(path: &Path, content: &str) -> Result<(), String> {
     if !is_test {
         let mut module_doc_len = 0;
         for attr in &syn_file.attrs {
-            if matches!(attr.style, syn::AttrStyle::Inner(_))
-                && attr.path().is_ident("doc")
-                && let syn::Meta::NameValue(syn::MetaNameValue {
+            if matches!(attr.style, syn::AttrStyle::Inner(_)) && attr.path().is_ident("doc") {
+                if let syn::Meta::NameValue(syn::MetaNameValue {
                     value:
                         syn::Expr::Lit(syn::ExprLit {
                             lit: syn::Lit::Str(s),
@@ -117,8 +116,9 @@ pub fn check_source(path: &Path, content: &str) -> Result<(), String> {
                         }),
                     ..
                 }) = &attr.meta
-            {
-                module_doc_len += s.value().trim().len();
+                {
+                    module_doc_len += s.value().trim().len();
+                }
             }
         }
 
