@@ -28,16 +28,20 @@ To keep files compact, modular, and optimized for LLM context windows, strict ar
    * Every non-test production `.rs` file must begin with a file-level doc comment (`//!`) of **at least 100 characters** describing its purpose, responsibilities, and architecture.
 2. **Rule 2: Production Logical Code Limit (Max 10,000 Characters)**:
    * The total character count of active production code lines (excluding comments, doc comments, empty lines, and `#[cfg(test)]` blocks) must be **under 10,000 characters** (approx. 200–300 lines of SLOC).
-   * Note: Comprehensive unit tests in `#[cfg(test)]` do not count against this limit, fully preserving TDD incentives.
    * Exceeding this limit indicates bloated responsibility; split into cohesive submodules.
    * *Escape Hatch*: For declarative UI files or code-generated suites, annotate the file with `#![allow(clippy::too_many_lines)]` to bypass this constraint.
-3. **Rule 3: File Documentation Limit (Max 4,000 Characters)**:
+3. **Rule 2b: Inline Unit Test Limit in `src/` (Max 5,000 Characters)**:
+   * Inline unit tests (`#[cfg(test)]`) inside a `src/` file must not exceed **5,000 characters**.
+   * When unit or integration tests become complex, multi-component, or exceed 5,000 characters, they must be extracted into the root `tests/` directory (e.g., `tests/<module>_test.rs`). This keeps production files lean and prevents test suites from bloating LLM context windows.
+4. **Rule 3: File Documentation Limit (Max 4,000 Characters)**:
    * The total character count of documentation comments (`//`, `///`, `//!`, `/* */`) must be **under 4,000 characters** (approx. 50–80 lines).
    * This forces descriptions to remain concise and high-signal, preventing LLM context bloat.
-4. **Rule 4: Function Physical Size Limit (Max 2,000 Characters)**:
-   * A single function (including its signature, body, comments, and braces) must be **under 2,000 characters** (approx. 40–50 physical lines).
-   * Ensures every function fits cleanly on a single screen or within a single context window turn.
-   * *Escape Hatch*: For macro-heavy UI components (e.g. Dioxus `rsx!`), large router tables (e.g. Axum), or complex state machines that cannot be cleanly split, annotate the function with `#[allow(clippy::too_many_lines)]` to explicitly bypass this check.
+5. **Rule 4: Function Physical Size Limit (Max 2,000 Characters)**:
+   * A single function (production or test, including signature, body, comments, and braces) must be **under 2,000 characters** (approx. 40–50 physical lines).
+   * Ensures every function fits cleanly on a single screen or within a single context window turn. Oversized test functions must be refactored into smaller test cases or helper assertions.
+   * *Escape Hatch*: For macro-heavy UI components (e.g. Dioxus `rsx!`), large router tables (e.g. Axum), or complex state machines that cannot be cleanly split, annotate the function with `#[allow(clippy::too_many_lines)]`.
+6. **Anti-Code-Golfing Principle**:
+   * Never compress variable names (e.g. `transaction_context` -> `tc`), eliminate idiomatic whitespace/newlines, or abuse macros to artificially circumvent character limits. Limits exist to force clean architectural decomposition into cohesive submodules and helper functions.
 
 ---
 

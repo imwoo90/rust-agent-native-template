@@ -108,11 +108,11 @@ fn test_excessive_logical_code_fails_rule_2() {
 
 #[test]
 fn test_large_test_module_does_not_penalize_production_code_limit() {
-    // Generate 10 test functions, each ~1,000 chars (total > 10,000 chars of tests)
+    // Generate 4 test functions, each ~900 chars (total ~3,800 chars of tests, under 5,000 char limit)
     let mut big_test_code = String::new();
-    for f in 0..10 {
+    for f in 0..4 {
         big_test_code.push_str(&format!("    #[test]\n    fn test_case_{}() {{\n", f));
-        for i in 0..30 {
+        for i in 0..25 {
             big_test_code.push_str(&format!("        let _test_var_{}_{} = {};\n", f, i, i));
         }
         big_test_code.push_str("    }\n\n");
@@ -468,9 +468,9 @@ fn test_compound_cfg_with_not_feature_and_test_scope() {
     // Verifies that `#[cfg(all(not(feature = "mock"), test))]` correctly identifies the test scope
     // and does NOT count towards production code limit.
     let mut big_test = String::new();
-    for i in 0..10 {
+    for i in 0..4 {
         big_test.push_str(&format!("    pub fn test_fn_{}() {{\n", i));
-        for j in 0..30 {
+        for j in 0..20 {
             big_test.push_str(&format!("        let _x_{}_{} = {};\n", i, j, j));
         }
         big_test.push_str("    }\n");
@@ -551,8 +551,9 @@ pub fn parse<'a, 'b>(input: &'a str, _fallback: &'b str) -> Option<&'a str> { //
 }
 
 #[test]
-fn test_large_test_function_exceeding_2000_chars_is_exempt_from_rule_4() {
-    // Verifies that test functions inside #[cfg(test)] exceeding 2,000 chars are exempt from Rule 4.
+fn test_large_test_function_exceeding_2000_chars_fails_rule_4() {
+    // Verifies that test functions inside #[cfg(test)] are ALSO subject to Rule 4 (2,000 chars)
+    // to prevent oversized monolithic test methods.
     let mut large_test_body = String::new();
     for i in 0..70 {
         large_test_body.push_str(&format!("        let _expected_table_entry_{} = {};\n", i, i * 10));
@@ -561,7 +562,7 @@ fn test_large_test_function_exceeding_2000_chars_is_exempt_from_rule_4() {
     let source = format!(
         r#"//! # Large Test Function Module
 //!
-//! Verifies that AGENTS.md Rule 4 does not penalize large test functions inside #[cfg(test)].
+//! Verifies that AGENTS.md Rule 4 enforces the 2,000-char limit on test functions as well.
 
 pub fn small_prod() -> bool {{
     true
@@ -579,10 +580,76 @@ mod tests {{
         large_test_body
     );
 
-    let res = linter::check_source(Path::new("src/test_large_fn.rs"), &source);
+    let res = linter::check_source(Path::new("src/large_fn.rs"), &source);
+    assert!(
+        res.is_err(),
+        "Expected oversized test function to fail Rule 4: {:?}",
+        res
+    );
+    let err = res.unwrap_err();
+    assert!(err.contains("Rule 4"), "Error was: {}", err);
+}
+
+#[test]
+fn test_inline_tests_exceeding_5000_chars_fails_rule_2b() {
+    // Verifies that inline unit tests exceeding 5,000 characters trigger Rule 2b
+    // to guide agents to extract integration tests into the root tests/ directory.
+    let mut big_tests = String::new();
+    for i in 0..15 {
+        big_tests.push_str(&format!("    #[test]\n    fn test_case_{}() {{\n", i));
+        for j in 0..12 {
+            big_tests.push_str(&format!("        let _val_{}_{} = {};\n", i, j, j * 2));
+        }
+        big_tests.push_str("    }\n\n");
+    }
+
+    let source = format!(
+        r#"//! # Inline Test Bloat Module
+//!
+//! Verifies that excessive inline test code in src/ triggers Rule 2b.
+
+pub fn prod_func() -> usize {{ 42 }}
+
+#[cfg(test)]
+mod tests {{
+{}
+}}
+"#,
+        big_tests
+    );
+
+    let res = linter::check_source(Path::new("src/bloated_tests.rs"), &source);
+    assert!(
+        res.is_err(),
+        "Expected inline tests exceeding 5,000 chars to fail Rule 2b: {:?}",
+        res
+    );
+    let err = res.unwrap_err();
+    assert!(err.contains("Rule 2b"), "Error was: {}", err);
+    assert!(err.contains("tests/"), "Error should guide moving to tests/ dir: {}", err);
+}
+
+#[test]
+fn test_nested_block_comments_do_not_prematurely_exit() {
+    // Verifies that nested block comments /* /* */ */ are correctly tracked by depth.
+    let source = r#"//! # Nested Comment Module
+//!
+//! Verifies that Rust nested block comments do not prematurely exit comment scanning mode.
+
+pub fn calculate() -> i32 {
+    /*
+       Outer comment
+       /* Inner nested block comment */
+       Still in comment block!
+       let fake_code = 123;
+    */
+    42
+}
+"#;
+    let res = linter::check_source(Path::new("src/nested_comment.rs"), source);
     assert!(
         res.is_ok(),
-        "Expected large test function inside #[cfg(test)] to pass Rule 4: {:?}",
+        "Expected nested block comments to pass smoothly: {:?}",
         res
     );
 }
@@ -591,8 +658,8 @@ mod tests {{
 fn test_test_comments_do_not_consume_production_doc_budget() {
     // Verifies that large explanatory comments in unit tests do not cause Rule 3 violation (> 4,000 chars).
     let mut big_test_comments = String::new();
-    for i in 0..100 {
-        big_test_comments.push_str(&format!("    // Test step {}: Detailed comment explaining test behavior and assertions\n", i));
+    for i in 0..60 {
+        big_test_comments.push_str(&format!("    // Test step {}: Detailed comment explaining test behavior\n", i));
     }
 
     let source = format!(
@@ -623,17 +690,17 @@ mod tests {{
 }
 
 #[test]
-fn test_multisegment_test_attribute_tokio_test_exempt() {
-    // Verifies that #[tokio::test] functions are recognized as test scopes and exempt from Rule 4.
-    let mut large_async_body = String::new();
-    for i in 0..70 {
-        large_async_body.push_str(&format!("    let _state_{} = {};\n", i, i * 5));
+fn test_multisegment_test_attribute_tokio_test_exempt_from_rule_2() {
+    // Verifies that #[tokio::test] functions are recognized as test scopes and do not count toward Rule 2.
+    let mut async_body = String::new();
+    for i in 0..15 {
+        async_body.push_str(&format!("    let _state_{} = {};\n", i, i * 5));
     }
 
     let source = format!(
         r#"//! # Tokio Test Module
 //!
-//! Verifies that functions annotated with multi-segment test attributes like `#[tokio::test]` are exempt from Rule 4.
+//! Verifies that functions annotated with multi-segment test attributes like `#[tokio::test]` are recognized as test scopes.
 
 pub fn prod_small() {{}}
 
@@ -642,14 +709,15 @@ async fn test_async_workflow() {{
 {}
 }}
 "#,
-        large_async_body
+        async_body
     );
 
     let res = linter::check_source(Path::new("src/async_test.rs"), &source);
     assert!(
         res.is_ok(),
-        "Expected #[tokio::test] function to be exempt from Rule 4: {:?}",
+        "Expected #[tokio::test] function to pass: {:?}",
         res
     );
 }
+
 

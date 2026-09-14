@@ -11,6 +11,7 @@ const MIN_MODULE_DOC_CHARS: usize = 100;
 const MAX_LOGICAL_CODE_CHARS: usize = 10_000;
 const MAX_DOC_CHARS: usize = 4_000;
 const MAX_FUNCTION_CHARS: usize = 2_000;
+const MAX_INLINE_TEST_CHARS: usize = 5_000;
 
 #[allow(dead_code)]
 fn main() {
@@ -72,9 +73,9 @@ pub fn check_source(path: &Path, content: &str) -> Result<(), String> {
     };
     scope_collector.visit_file(&syn_file);
 
-    // Pass 2: Calculate character metrics (Rules 2 & 3) with string/comment-aware scanning
+    // Pass 2: Calculate character metrics (Rules 2, 2b & 3) with string/comment-aware scanning
     let lines: Vec<&str> = content.lines().collect();
-    let (prod_logical_code_chars, doc_chars) =
+    let (prod_logical_code_chars, doc_chars, inline_test_chars) =
         scan_code_and_comments(&lines, is_test_file, &scope_collector.test_line_ranges);
 
     // 1. Check production logical code limit (max 10,000 characters, Rule 2)
@@ -83,6 +84,16 @@ pub fn check_source(path: &Path, content: &str) -> Result<(), String> {
         return Err(format!(
             "Rule: AGENTS.md Rule 2 (Production Logical Code Limit)\nLocation: {:?}\nLimit: Maximum {} characters (excluding tests & comments)\nActual: {} characters (+{} over limit)\nAction: Refactor by splitting responsibilities into cohesive submodules, or use #![allow(clippy::too_many_lines)] for macro-heavy suites.",
             path, MAX_LOGICAL_CODE_CHARS, prod_logical_code_chars, over
+        ));
+    }
+
+    // 1b. Check inline unit test limit in src/ (max 5,000 characters, Rule 2b)
+    if !is_test_file && !file_has_skip && inline_test_chars > MAX_INLINE_TEST_CHARS {
+        let over = inline_test_chars - MAX_INLINE_TEST_CHARS;
+        let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("module");
+        return Err(format!(
+            "Rule: AGENTS.md Rule 2b (Inline Unit Test Limit)\nLocation: {:?}\nLimit: Maximum {} characters for inline tests in src/\nActual: {} characters (+{} over limit)\nAction: Move complex or integration tests to the root `tests/` directory (e.g. tests/{}_test.rs) to keep production files compact for LLM context windows.",
+            path, MAX_INLINE_TEST_CHARS, inline_test_chars, over, stem
         ));
     }
 
@@ -130,7 +141,6 @@ pub fn check_source(path: &Path, content: &str) -> Result<(), String> {
             path,
             source_lines: &lines,
             is_test_file,
-            test_line_ranges: &scope_collector.test_line_ranges,
             current_impl_has_skip: false,
             errors: Vec::new(),
         };
@@ -266,7 +276,6 @@ struct FunctionSizeChecker<'a> {
     path: &'a Path,
     source_lines: &'a [&'a str],
     is_test_file: bool,
-    test_line_ranges: &'a [RangeInclusive<usize>],
     current_impl_has_skip: bool,
     errors: Vec<String>,
 }
@@ -282,7 +291,6 @@ impl<'a> FunctionSizeChecker<'a> {
         if self.is_test_file
             || self.current_impl_has_skip
             || has_skip_attribute(attrs)
-            || is_cfg_test(attrs)
         {
             return;
         }
@@ -291,11 +299,6 @@ impl<'a> FunctionSizeChecker<'a> {
         let end = body_span.end();
 
         if start.line == 0 || end.line == 0 || start.line > self.source_lines.len() {
-            return;
-        }
-
-        // Exempt functions inside test scopes to preserve TDD incentives
-        if self.test_line_ranges.iter().any(|r| r.contains(&start.line)) {
             return;
         }
 
@@ -348,10 +351,11 @@ fn scan_code_and_comments(
     lines: &[&str],
     is_test_file: bool,
     test_ranges: &[RangeInclusive<usize>],
-) -> (usize, usize) {
+) -> (usize, usize, usize) {
     let mut prod_logical_code_chars = 0;
     let mut doc_chars = 0;
-    let mut in_block_comment = false;
+    let mut inline_test_chars = 0;
+    let mut block_comment_depth = 0;
     let mut in_raw_string = false;
 
     for (line_idx, line) in lines.iter().enumerate() {
@@ -366,17 +370,15 @@ fn scan_code_and_comments(
 
         let is_in_test_scope = is_test_file || test_ranges.iter().any(|r| r.contains(&line_num));
 
-        if in_block_comment {
+        if block_comment_depth > 0 {
             if !is_in_test_scope {
                 doc_chars += line_char_count;
+            } else if !is_test_file {
+                inline_test_chars += line_char_count;
             }
-            if let Some(pos) = trimmed.find("*/") {
-                in_block_comment = false;
-                let remainder = trimmed[pos + 2..].trim();
-                if !remainder.is_empty() && !is_in_test_scope {
-                    prod_logical_code_chars += remainder.chars().count();
-                }
-            }
+            let opens = trimmed.matches("/*").count();
+            let closes = trimmed.matches("*/").count();
+            block_comment_depth = (block_comment_depth + opens).saturating_sub(closes);
             continue;
         }
 
@@ -387,6 +389,8 @@ fn scan_code_and_comments(
             }
             if !is_in_test_scope {
                 prod_logical_code_chars += line_char_count;
+            } else if !is_test_file {
+                inline_test_chars += line_char_count;
             }
             continue;
         }
@@ -396,17 +400,23 @@ fn scan_code_and_comments(
         if trimmed.starts_with("//") {
             if !is_in_test_scope {
                 doc_chars += line_char_count;
+            } else if !is_test_file {
+                inline_test_chars += line_char_count;
             }
             continue;
         }
 
-        // Check standard block comment start
+        // Check standard block comment start (supporting nested block comments)
         if trimmed.starts_with("/*") {
+            let opens = trimmed.matches("/*").count();
+            let closes = trimmed.matches("*/").count();
+            if opens > closes {
+                block_comment_depth = opens - closes;
+            }
             if !is_in_test_scope {
                 doc_chars += line_char_count;
-            }
-            if !trimmed.contains("*/") {
-                in_block_comment = true;
+            } else if !is_test_file {
+                inline_test_chars += line_char_count;
             }
             continue;
         }
@@ -421,6 +431,8 @@ fn scan_code_and_comments(
             }
             if !is_in_test_scope {
                 prod_logical_code_chars += line_char_count;
+            } else if !is_test_file {
+                inline_test_chars += line_char_count;
             }
             continue;
         }
@@ -432,13 +444,17 @@ fn scan_code_and_comments(
             if !is_in_test_scope {
                 prod_logical_code_chars += code_part.chars().count() + 1;
                 doc_chars += comment_part.chars().count();
+            } else if !is_test_file {
+                inline_test_chars += line_char_count;
             }
         } else if !is_in_test_scope {
             prod_logical_code_chars += line_char_count;
+        } else if !is_test_file {
+            inline_test_chars += line_char_count;
         }
     }
 
-    (prod_logical_code_chars, doc_chars)
+    (prod_logical_code_chars, doc_chars, inline_test_chars)
 }
 
 /// Helper to parse character literal byte length starting with `'`.

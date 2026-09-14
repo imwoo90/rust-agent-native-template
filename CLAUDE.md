@@ -10,8 +10,10 @@ This repository adheres to the **Agent-Native** architecture and compiler-enforc
 
 2. **Compile-Time Architectural Limits (`build.rs`)**:
    - **Production Code Budget**: Keep active production code lines under **10,000 characters** per file (excluding comments and `#[cfg(test)]` blocks).
+   - **Inline Test Budget**: Keep inline unit tests (`#[cfg(test)]`) under **5,000 characters** in `src/`. Complex or integration tests must be moved to the root `tests/` directory.
    - **Documentation Budget**: Keep doc comments under **4,000 characters** per file to preserve LLM context density.
-   - **Function Budget**: Every function must be under **2,000 characters** (~40–50 lines). Decompose large functions into single-responsibility helpers.
+   - **Function Budget**: Every function (production or test) must be under **2,000 characters** (~40–50 lines). Decompose large functions into single-responsibility helpers.
+   - **Anti-Code-Golfing**: Never shorten variable names or cram logic into macros to bypass character limits. Use clean modular decomposition.
 
 3. **Public API Contracts & Panic-Free Guarantee (`Cargo.toml [lints]`)**:
    - Every public item (`pub fn`, `pub struct`, `pub enum`, `pub trait`, `pub type`, and public inherent method) must have `///` doc comments with executable doctests (`missing_docs = "deny"`).

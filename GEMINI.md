@@ -11,9 +11,11 @@ This project follows the **Agent-Native** architecture and compiler-enforced qua
 2. **Compile-Time Limits (Hard Build Failure)**:
    - **Rule 1**: Every production `.rs` file must begin with a `//!` header of at least 100 characters.
    - **Rule 2**: Production logical code must not exceed 10,000 characters per file (excluding `#[cfg(test)]`).
+   - **Rule 2b**: Inline unit tests (`#[cfg(test)]`) in `src/` must not exceed 5,000 characters (move larger test suites to `tests/`).
    - **Rule 3**: Documentation comments must not exceed 4,000 characters per file.
-   - **Rule 4**: Individual functions must not exceed 2,000 characters.
+   - **Rule 4**: Individual functions (production or test) must not exceed 2,000 characters.
    - **Package Lints**: All public interfaces require `///` doc comments (`missing_docs = "deny"`), and `.unwrap()`/`.expect()` are prohibited in production (`clippy::unwrap_used = "deny"`).
+   - **Anti-Code-Golfing**: Never shorten variable names or cram code to bypass limits; decompose into helpers.
 
 3. **Verification**:
    Always verify code changes with:
