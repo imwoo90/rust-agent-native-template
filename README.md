@@ -69,7 +69,8 @@ rust-agent-native-template/
 ├── tests/
 │   ├── integration_test.rs        # External integration test suite
 │   └── linter_test.rs             # Compile-time AST linter TDD verification suite
-├── AGENTS.md                      # AI Agent & Developer collaboration standards (SSOT)
+├── AGENT_NATIVE.md                # Universal Agent-Native architectural standards (Upstream Engine)
+├── AGENTS.md                      # AI Agent & Developer collaboration standards (Project Canvas)
 ├── CLAUDE.md                      # Claude Code bridge (points to AGENTS.md)
 ├── GEMINI.md                      # Antigravity / Gemini bridge (points to AGENTS.md)
 ├── build.rs                       # Compile-time hard linter engine (Rules 1-4)

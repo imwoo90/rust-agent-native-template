@@ -5,6 +5,7 @@ include = [
     "build.rs",
     "build_linter.rs",
     ".agent-lint.toml",
+    "AGENT_NATIVE.md",
     "AGENTS.md",
     "CLAUDE.md",
     "GEMINI.md",
