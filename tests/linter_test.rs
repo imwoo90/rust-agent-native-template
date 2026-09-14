@@ -1,6 +1,6 @@
 #![allow(missing_docs, clippy::unwrap_used, clippy::expect_used)]
 
-#[path = "../build.rs"]
+#[path = "../build_linter.rs"]
 mod linter;
 
 use std::path::Path;
@@ -718,6 +718,61 @@ async fn test_async_workflow() {{
         "Expected #[tokio::test] function to pass: {:?}",
         res
     );
+}
+
+#[test]
+fn test_load_config_parses_agent_lint_toml() {
+    // Verifies that load_config reads values from .agent-lint.toml
+    let config = linter::load_config(Path::new("."));
+    assert_eq!(config.min_module_doc_chars, 100);
+    assert_eq!(config.max_logical_code_chars, 10_000);
+    assert_eq!(config.max_inline_test_chars, 5_000);
+    assert_eq!(config.max_doc_chars, 4_000);
+    assert_eq!(config.max_function_chars, 2_000);
+}
+
+#[test]
+fn test_custom_config_enforced_in_check_source() {
+    // Verifies that a stricter custom configuration triggers when threshold is exceeded
+    let custom_config = linter::LinterConfig {
+        min_module_doc_chars: 100,
+        max_logical_code_chars: 200, // Very strict limit
+        max_inline_test_chars: 5_000,
+        max_doc_chars: 4_000,
+        max_function_chars: 2_000,
+    };
+
+    let source = r#"//! # Strict Config Test Module
+//!
+//! Valid header with more than 100 characters to pass rule 1 check successfully.
+
+pub fn generate_data() {
+    let _a = 1;
+    let _b = 2;
+    let _c = 3;
+    let _d = 4;
+    let _e = 5;
+    let _f = 6;
+    let _g = 7;
+    let _h = 8;
+    let _i = 9;
+    let _j = 10;
+    let _k = 11;
+    let _l = 12;
+    let _m = 13;
+    let _n = 14;
+    let _o = 15;
+    let _p = 16;
+}
+"#;
+    let res = linter::check_source_with_config(Path::new("src/strict.rs"), source, &custom_config);
+    assert!(
+        res.is_err(),
+        "Expected strict custom max_logical_code_chars to trigger error: {:?}",
+        res
+    );
+    let err = res.unwrap_err();
+    assert!(err.contains("Rule 2"), "Error was: {}", err);
 }
 
 

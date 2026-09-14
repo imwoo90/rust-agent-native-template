@@ -3,6 +3,8 @@ cargo_generate_version = ">=0.18.0"
 include = [
     "Cargo.toml",
     "build.rs",
+    "build_linter.rs",
+    ".agent-lint.toml",
     "AGENTS.md",
     "CLAUDE.md",
     "GEMINI.md",
@@ -20,6 +22,9 @@ exclude = [
     "target/**",
     "Cargo.lock"
 ]
+
+[hooks]
+post = ["scripts/post.rhai"]
 
 [placeholders]
 description = { type = "string", prompt = "Project description:", default = "An Agent-Native Rust project with compile-time linting and living LLM-Wiki." }
