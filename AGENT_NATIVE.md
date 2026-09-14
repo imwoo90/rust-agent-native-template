@@ -10,15 +10,19 @@ Built upon the **"Code as Documentation" (Living LLM-Wiki)** philosophy, this fr
 
 To prevent documentation rot and maximize the signal-to-noise ratio (SNR) in LLM context windows, the Rust source code itself acts as the living knowledge base for architecture, interfaces, and design decisions.
 
-1. **`mod.rs` = `index.md`**:
-   * Every directory's `mod.rs` serves as the `index.md` (table of contents and architectural map) for that module.
-   * Module-level doc comments (`//!`) at the top of `mod.rs` describe high-level responsibilities, domain boundaries, data flows, and design rationale.
+1. **`mod.rs` = `index.md` (Module Architecture Catalog)**:
+   * Every directory's `mod.rs` acts as the `index.md` (table of contents and architectural map) for that domain.
+   * `mod.rs` headers MUST provide:
+     - `## Overview`: High-level domain responsibility in 1-2 concise sentences.
+     - `## Submodules`: Table of contents linking each submodule (`- [`[`submodule`]`]: ...`) with a **1-line single-responsibility summary**. This allows AI agents to navigate to the exact file in $O(\log N)$ steps without opening every child file.
+     - `## Search Tags`: Comma-separated search keywords (`#tag1, #tag2`) for fast deterministic grep.
 2. **Compiler-Verified Documentation**:
    * Never write documentation that cannot be compiled. Structs, traits, and public functions must use standard doc comments (`///`) with executable code examples (`doctests`).
    * When running `cargo test`, the compiler executes all doctests, guaranteeing documentation never becomes obsolete.
-3. **Compile-Checked Intra-Doc Links**:
+3. **Compile-Checked Intra-Doc Links (Type-Safe Graph)**:
    * Reference other types, modules, or functions using Rust's native intra-doc link syntax (e.g. `[`[`Calculator`](crate::example::Calculator)`]`).
    * Rustdoc validates every link at build time (`RUSTDOCFLAGS="-D warnings" cargo doc --no-deps`), eliminating broken references and hallucinations.
+   * *Anti-Pattern (No Manual Collaboration Graphs)*: Do NOT manually write natural-language "Collaboration Graphs" in leaf files. Rust's native type system, `use` declarations, and compiler-verified intra-doc links already define the dependency graph with zero drift.
 
 ---
 
@@ -27,7 +31,9 @@ To prevent documentation rot and maximize the signal-to-noise ratio (SNR) in LLM
 To prevent monoliths and keep files optimized for LLM context windows, strict AST constraints are enforced during `cargo check`, `cargo build`, and `cargo test`:
 
 1. **Rule 1: File-Level Living Wiki Header (Min 100 Characters)**:
-   * Every non-test production `.rs` file must begin with a file-level doc comment (`//!`) of **at least 100 characters** describing its purpose, responsibilities, and architecture.
+   * Every non-test production `.rs` file must begin with a file-level doc comment (`//!`) of **at least 100 characters**.
+   * **For `mod.rs`**: Follow the `index.md` format (`## Overview`, `## Submodules` with 1-line child summaries, `## Search Tags`).
+   * **For leaf `.rs` files**: Follow the focused component format (`## Overview` with single responsibility, `## Search Tags`). Keep it dense and free of redundant dependency text.
 2. **Rule 2: Production Logical Code Limit (Max 10,000 Characters)**:
    * The character count of active production code (excluding comments, doc comments, blank lines, and `#[cfg(test)]` modules) must not exceed **10,000 characters** (~200–300 lines of SLOC).
    * Exceeding this limit indicates bloated responsibility; split into cohesive submodules.

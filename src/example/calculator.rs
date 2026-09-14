@@ -2,6 +2,9 @@
 //!
 //! Provides fundamental arithmetic operations designed as an executable, compiler-verified example
 //! of the Agent-Native pattern. Includes unit tests, executable doctests, and typed error handling.
+//!
+//! ## Search Tags
+//! #calculator, #math, #arithmetic
 
 /// A simple accumulator-based calculator engine.
 ///

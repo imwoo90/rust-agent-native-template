@@ -6,6 +6,9 @@
 //!
 //! ## Submodules
 //! - [`calculator`]: Core calculation engine providing verified basic arithmetic operations.
+//!
+//! ## Search Tags
+//! #example, #calculator, #arithmetic
 
 pub mod calculator;
 
