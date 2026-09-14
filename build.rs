@@ -110,7 +110,8 @@ pub fn check_source(path: &Path, content: &str) -> Result<(), String> {
                     ..
                 }) = &attr.meta
             {
-                module_doc_len += s.value().trim().len();
+                // Measure actual Unicode characters, not UTF-8 bytes (prevents CJK penalty)
+                module_doc_len += s.value().trim().chars().count();
             }
         }
 
@@ -128,6 +129,7 @@ pub fn check_source(path: &Path, content: &str) -> Result<(), String> {
         let mut visitor = FunctionSizeChecker {
             path,
             source_lines: &lines,
+            current_impl_has_skip: false,
             errors: Vec::new(),
         };
         visitor.visit_file(&syn_file);
@@ -216,7 +218,7 @@ impl<'ast> Visit<'ast> for TestScopeCollector {
     }
 }
 
-/// Checks if attributes indicate a test configuration, avoiding false positives like `#[cfg(not(test))]`.
+/// Checks if attributes indicate a test configuration, avoiding token spacing artifacts.
 fn is_cfg_test(attrs: &[syn::Attribute]) -> bool {
     attrs.iter().any(|attr| {
         if attr.path().is_ident("test") {
@@ -225,19 +227,18 @@ fn is_cfg_test(attrs: &[syn::Attribute]) -> bool {
         if attr.path().is_ident("cfg")
             && let syn::Meta::List(list) = &attr.meta
         {
-            let token_str = list.tokens.to_string();
-            let trimmed = token_str.trim();
-            if trimmed == "test"
-                || trimmed.starts_with("test,")
-                || trimmed.ends_with(", test")
-                || trimmed.contains(", test,")
+            let compact = list.tokens.to_string().replace(" ", "");
+            if compact == "test"
+                || compact.starts_with("test,")
+                || compact.ends_with(",test")
+                || compact.contains(",test,")
             {
                 return true;
             }
-            if (trimmed.starts_with("all(") || trimmed.starts_with("any("))
-                && !trimmed.contains("not(")
+            if (compact.starts_with("all(") || compact.starts_with("any("))
+                && !compact.contains("not(")
             {
-                return trimmed
+                return compact
                     .split(|c: char| !c.is_alphanumeric() && c != '_')
                     .any(|w| w == "test");
             }
@@ -250,6 +251,7 @@ fn is_cfg_test(attrs: &[syn::Attribute]) -> bool {
 struct FunctionSizeChecker<'a> {
     path: &'a Path,
     source_lines: &'a [&'a str],
+    current_impl_has_skip: bool,
     errors: Vec<String>,
 }
 
@@ -261,7 +263,7 @@ impl<'a> FunctionSizeChecker<'a> {
         sig_span: proc_macro2::Span,
         body_span: proc_macro2::Span,
     ) {
-        if has_skip_attribute(attrs) {
+        if self.current_impl_has_skip || has_skip_attribute(attrs) {
             return;
         }
 
@@ -290,6 +292,15 @@ impl<'ast, 'a> Visit<'ast> for FunctionSizeChecker<'a> {
         syn::visit::visit_item_fn(self, node);
     }
 
+    fn visit_item_impl(&mut self, node: &'ast syn::ItemImpl) {
+        let prev = self.current_impl_has_skip;
+        if has_skip_attribute(&node.attrs) {
+            self.current_impl_has_skip = true;
+        }
+        syn::visit::visit_item_impl(self, node);
+        self.current_impl_has_skip = prev;
+    }
+
     fn visit_impl_item_fn(&mut self, node: &'ast syn::ImplItemFn) {
         let fn_name = node.sig.ident.to_string();
         self.check_fn_size(&fn_name, &node.attrs, node.sig.span(), node.block.span());
@@ -306,7 +317,8 @@ impl<'ast, 'a> Visit<'ast> for FunctionSizeChecker<'a> {
 }
 
 /// Scans source lines and calculates code vs doc character counts.
-/// Accurately avoids confusing raw strings or string literals containing `/*` or `//` with actual comments.
+/// Accurately counts Unicode characters (preventing multi-byte CJK penalty)
+/// and strictly prioritizes comments before raw strings to prevent parser locks.
 fn scan_code_and_comments(
     lines: &[&str],
     is_test_file: bool,
@@ -320,7 +332,8 @@ fn scan_code_and_comments(
     for (line_idx, line) in lines.iter().enumerate() {
         let line_num = line_idx + 1; // 1-indexed
         let trimmed = line.trim();
-        let line_len = line.len() + 1; // Count raw line length + newline character
+        // Use true Unicode character count (+1 for newline), not UTF-8 bytes
+        let line_char_count = line.chars().count() + 1;
 
         if trimmed.is_empty() {
             continue;
@@ -329,12 +342,12 @@ fn scan_code_and_comments(
         let is_in_test_scope = is_test_file || test_ranges.iter().any(|r| r.contains(&line_num));
 
         if in_block_comment {
-            doc_chars += line_len;
+            doc_chars += line_char_count;
             if let Some(pos) = trimmed.find("*/") {
                 in_block_comment = false;
                 let remainder = trimmed[pos + 2..].trim();
                 if !remainder.is_empty() && !is_in_test_scope {
-                    prod_logical_code_chars += remainder.len();
+                    prod_logical_code_chars += remainder.chars().count();
                 }
             }
             continue;
@@ -346,11 +359,28 @@ fn scan_code_and_comments(
                 in_raw_string = false;
             }
             if !is_in_test_scope {
-                prod_logical_code_chars += line_len;
+                prod_logical_code_chars += line_char_count;
             }
             continue;
         }
 
+        // [P1 Fix]: Line comments MUST be evaluated BEFORE raw string markers
+        // to prevent comments like `// pattern r#"..."#` from falsely locking into raw string mode!
+        if trimmed.starts_with("//") {
+            doc_chars += line_char_count;
+            continue;
+        }
+
+        // Check standard block comment start
+        if trimmed.starts_with("/*") {
+            doc_chars += line_char_count;
+            if !trimmed.contains("*/") {
+                in_block_comment = true;
+            }
+            continue;
+        }
+
+        // Check raw string start in actual code
         if trimmed.contains("r#\"") || trimmed.contains("r##\"") {
             if !(trimmed.ends_with("\"#")
                 || trimmed.ends_with("\"##")
@@ -359,22 +389,7 @@ fn scan_code_and_comments(
                 in_raw_string = true;
             }
             if !is_in_test_scope {
-                prod_logical_code_chars += line_len;
-            }
-            continue;
-        }
-
-        // Check standard line comment
-        if trimmed.starts_with("//") {
-            doc_chars += line_len;
-            continue;
-        }
-
-        // Check standard block comment start
-        if trimmed.starts_with("/*") {
-            doc_chars += line_len;
-            if !trimmed.contains("*/") {
-                in_block_comment = true;
+                prod_logical_code_chars += line_char_count;
             }
             continue;
         }
@@ -384,11 +399,11 @@ fn scan_code_and_comments(
             let code_part = trimmed[..slash_pos].trim();
             let comment_part = &trimmed[slash_pos..];
             if !is_in_test_scope {
-                prod_logical_code_chars += code_part.len() + 1;
+                prod_logical_code_chars += code_part.chars().count() + 1;
             }
-            doc_chars += comment_part.len();
+            doc_chars += comment_part.chars().count();
         } else if !is_in_test_scope {
-            prod_logical_code_chars += line_len;
+            prod_logical_code_chars += line_char_count;
         }
     }
 

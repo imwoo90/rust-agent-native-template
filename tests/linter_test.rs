@@ -325,3 +325,94 @@ impl Worker {
         res
     );
 }
+
+#[test]
+fn test_comment_containing_raw_string_syntax_does_not_lock_parser() {
+    let source = r##"//! # Raw String In Comment Test Module
+//!
+//! Verifies that comments mentioning raw string syntax like `r#"..."#` do not falsely lock the parser.
+
+// Tip: You can define raw strings using r#"syntax"# in Rust.
+// This second comment should still be recognized as a comment, not code!
+pub fn hello() -> &'static str {
+    "hello"
+}
+"##;
+    let res = linter::check_source(Path::new("src/raw_comment.rs"), source);
+    assert!(
+        res.is_ok(),
+        "Expected comment with raw string syntax to pass: {:?}",
+        res
+    );
+}
+
+#[test]
+fn test_unicode_korean_comments_do_not_suffer_byte_penalty() {
+    // 60 lines of Korean comments, ~30 chars each = ~1,800 Korean chars.
+    // In UTF-8 bytes, this is ~5,400 bytes.
+    // If the linter used bytes (Rule 3 limit = 4,000 bytes), this would fail.
+    // Under true Unicode char counting, 1,800 chars <= 4,000 chars, so it passes!
+    let mut korean_doc = String::new();
+    for i in 0..60 {
+        korean_doc.push_str(&format!(
+            "// 한국어 주석 테스트 줄 {:02}: 컴파일러 토큰 예산이 유니코드 글자 수로 계산되는지 검증합니다.\n",
+            i
+        ));
+    }
+
+    let source = format!(
+        r#"//! # 한국어 유니코드 주석 테스트 모듈
+//!
+//! 본 모듈은 CJK 다국어 주석이 UTF-8 바이트(Byte) 단위가 아닌 유니코드 글자(Char) 단위로 측정됨을 증명하는 공식 검증 모듈입니다.
+
+{}
+pub fn run_korean_task() -> bool {{
+    true
+}}
+"#,
+        korean_doc
+    );
+
+    let res = linter::check_source(Path::new("src/korean_doc.rs"), &source);
+    assert!(
+        res.is_ok(),
+        "Expected Unicode Korean comments to pass without byte penalty: {:?}",
+        res
+    );
+}
+
+#[test]
+fn test_impl_level_escape_hatch_inherits_to_inner_methods() {
+    let mut big_body = String::new();
+    for i in 0..100 {
+        big_body.push_str(&format!("        let _variable_{} = {};\n", i, i));
+    }
+
+    let source = format!(
+        r#"//! # Impl Escape Hatch Test Module
+//!
+//! Verifies that `#[allow(clippy::too_many_lines)]` placed on an `impl` block inherits to all methods.
+
+pub struct MacroUi;
+
+#[allow(clippy::too_many_lines)]
+impl MacroUi {{
+    pub fn method_one(&self) {{
+{}
+    }}
+
+    pub fn method_two(&self) {{
+{}
+    }}
+}}
+"#,
+        big_body, big_body
+    );
+
+    let res = linter::check_source(Path::new("src/impl_ui.rs"), &source);
+    assert!(
+        res.is_ok(),
+        "Expected impl-level escape hatch to inherit to inner methods: {:?}",
+        res
+    );
+}
