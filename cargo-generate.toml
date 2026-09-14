@@ -1,0 +1,22 @@
+[template]
+cargo_generate_version = ">=0.18.0"
+include = [
+    "Cargo.toml",
+    "build.rs",
+    "AGENTS.md",
+    "README.md",
+    "LICENSE",
+    ".gitignore",
+    ".vscode/**",
+    ".github/**",
+    "src/**",
+    "tests/**",
+    "scripts/**"
+]
+exclude = [
+    "target/**",
+    "Cargo.lock"
+]
+
+[placeholders]
+description = { type = "string", prompt = "Project description:", default = "An Agent-Native Rust project with compile-time linting and living LLM-Wiki." }

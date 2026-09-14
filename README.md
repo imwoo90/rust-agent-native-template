@@ -57,6 +57,10 @@ rust-agent-native-template/
 ├── .github/
 │   └── workflows/
 │       └── ci.yml                 # CI: formatting, linter, tests, intra-doc links
+├── .vscode/
+│   └── settings.json              # IDE real-time Clippy on save
+├── scripts/
+│   └── init.sh                    # 1-second automated project re-namespacing script
 ├── src/
 │   ├── example/
 │   │   ├── mod.rs                 # mod.rs as index.md with architectural summary
@@ -64,10 +68,12 @@ rust-agent-native-template/
 │   ├── lib.rs                     # Library entrypoint with crate-level living wiki
 │   └── main.rs                    # Binary CLI entrypoint
 ├── tests/
-│   └── integration_test.rs        # External integration test suite
+│   ├── integration_test.rs        # External integration test suite
+│   └── linter_test.rs             # Compile-time AST linter TDD verification suite
 ├── AGENTS.md                      # AI Agent & Developer collaboration standards
-├── build.rs                       # Compile-time hard linter engine
-├── Cargo.toml                     # Cargo manifest (Rust 2024 edition)
+├── build.rs                       # Compile-time hard linter engine (Rules 1-4)
+├── Cargo.toml                     # Cargo manifest ([lints] table and dependencies)
+├── cargo-generate.toml            # cargo-generate template configuration
 ├── LICENSE                        # Apache License 2.0
 └── README.md
 ```
@@ -76,17 +82,25 @@ rust-agent-native-template/
 
 ## 🚀 Getting Started
 
-### 1. Use as a GitHub Template
-Click the **"Use this template"** button at the top of the repository to create your new repository.
-
-Or clone directly:
+### Option A: Using `cargo-generate` (Recommended)
 ```bash
-git clone https://github.com/imwoo90/rust-agent-native-template.git my-project
+# Generate a new project interactively
+cargo generate imwoo90/rust-agent-native-template --name my-project
 cd my-project
 ```
 
+### Option B: Using GitHub Template / Direct Clone
+```bash
+# 1. Clone repository
+git clone https://github.com/imwoo90/rust-agent-native-template.git my-project
+cd my-project
+
+# 2. Initialize and re-namespace to your project name in 1 second
+./scripts/init.sh my-project
+```
+
 ### 2. Verify Your Environment
-Run the three essential Agent-Native verification commands:
+Run the essential Agent-Native verification suite:
 
 ```bash
 # 1. Compile-time linter verification
