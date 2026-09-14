@@ -57,7 +57,6 @@ Leveraging Rust 1.74+ package-level lint declarations, standard compiler and Cli
 2. **`clippy::unwrap_used = "deny"` & `clippy::expect_used = "deny"` (Clippy Standard Lints)**:
    * Prohibits `.unwrap()` and `.expect()` in production code, enforcing typed error handling (`Result<T, E>` and `?`).
    * *Test Exception*: In tests (`tests/` or `#[cfg(test)]`), you may annotate `#![allow(clippy::unwrap_used, clippy::expect_used)]` or return `Result<(), Box<dyn std::error::Error>>` to streamline assertions.
-   * Editor real-time checking is configured via `.vscode/settings.json` (`"rust-analyzer.check.command": "clippy"`).
 
 ---
 

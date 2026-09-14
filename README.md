@@ -34,7 +34,6 @@ Every `cargo check`, `cargo build`, and `cargo test` runs an automated AST inspe
 ### 2. ⚙️ Standard Quality & Safety Lints (`Cargo.toml [lints]`)
 * **Living LLM-Wiki Public API Contract**: `missing_docs = "deny"` mandates executable doc comments (`///`) on all public interfaces.
 * **Panic-Free Production Guarantee**: `clippy::unwrap_used = "deny"` and `clippy::expect_used = "deny"` enforce typed `Result<T, E>` and the `?` operator in production.
-* **Real-Time Editor Checking**: Configured via `.vscode/settings.json` (`"rust-analyzer.check.command": "clippy"`).
 
 ### 3. 🧠 Living LLM-Wiki (`mod.rs` = `index.md`)
 * Each directory represents a cohesive module domain whose `mod.rs` serves as the `index.md` architecture catalog.
@@ -59,8 +58,6 @@ rust-agent-native-template/
 ├── .github/
 │   ├── workflows/ci.yml           # CI: formatting, linter, tests, intra-doc links
 │   └── copilot-instructions.md    # GitHub Copilot instructions bridge
-├── .vscode/
-│   └── settings.json              # IDE real-time Clippy on save
 ├── scripts/
 │   └── init.sh                    # 1-second automated project re-namespacing script
 ├── src/

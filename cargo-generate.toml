@@ -12,7 +12,6 @@ include = [
     "LICENSE",
     ".gitignore",
     ".cursor/**",
-    ".vscode/**",
     ".github/**",
     "src/**",
     "tests/**",
