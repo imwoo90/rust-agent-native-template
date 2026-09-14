@@ -416,3 +416,120 @@ impl MacroUi {{
         res
     );
 }
+
+#[test]
+fn test_boundary_exact_100_chars_header_passes() {
+    // Exactly 100 characters of module doc text across the `//!` lines
+    // "1234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890" = 100 chars
+    let exact_100 = "1234567890".repeat(10);
+    assert_eq!(exact_100.chars().count(), 100);
+
+    let source = format!(
+        r#"//! {}
+
+pub fn boundary_ok() {{}}
+"#,
+        exact_100
+    );
+
+    let res = linter::check_source(Path::new("src/boundary_100.rs"), &source);
+    assert!(
+        res.is_ok(),
+        "Expected exactly 100-character header to pass Rule 1: {:?}",
+        res
+    );
+}
+
+#[test]
+fn test_boundary_99_chars_header_fails() {
+    // Exactly 99 characters of module doc text
+    let exact_99 = format!("{}123456789", "1234567890".repeat(9));
+    assert_eq!(exact_99.chars().count(), 99);
+
+    let source = format!(
+        r#"//! {}
+
+pub fn boundary_fail() {{}}
+"#,
+        exact_99
+    );
+
+    let res = linter::check_source(Path::new("src/boundary_99.rs"), &source);
+    assert!(
+        res.is_err(),
+        "Expected 99-character header to fail Rule 1 constraint"
+    );
+    let err = res.unwrap_err();
+    assert!(err.contains("Rule 1"), "Error was: {}", err);
+}
+
+#[test]
+fn test_compound_cfg_with_not_feature_and_test_scope() {
+    // Verifies that `#[cfg(all(not(feature = "mock"), test))]` correctly identifies the test scope
+    // and does NOT count towards production code limit.
+    let mut big_test = String::new();
+    for i in 0..10 {
+        big_test.push_str(&format!("    pub fn test_fn_{}() {{\n", i));
+        for j in 0..30 {
+            big_test.push_str(&format!("        let _x_{}_{} = {};\n", i, j, j));
+        }
+        big_test.push_str("    }\n");
+    }
+
+    let source = format!(
+        r#"//! # Compound CFG Test Module
+//!
+//! Verifies that `#[cfg(all(not(feature = "mock"), test))]` is recognized as a test scope.
+
+#[cfg(all(not(feature = "mock"), test))]
+mod tests {{
+{}
+}}
+
+pub fn prod_fn() {{}}
+"#,
+        big_test
+    );
+
+    let res = linter::check_source(Path::new("src/compound_cfg.rs"), &source);
+    assert!(
+        res.is_ok(),
+        "Expected compound cfg test scope to pass: {:?}",
+        res
+    );
+}
+
+#[test]
+fn test_compound_cfg_with_feature_test_utils_is_not_test_scope() {
+    // Verifies that `#[cfg(all(feature = "test-utils"))]` is NOT falsely classified as a test scope
+    // because "test-utils" is a feature flag name, not the `test` predicate.
+    let mut big_body = String::new();
+    for i in 0..20 {
+        big_body.push_str(&format!("    pub fn helper_{}() {{\n", i));
+        for j in 0..30 {
+            big_body.push_str(&format!("        let _v_{}_{} = {};\n", i, j, j));
+        }
+        big_body.push_str("    }\n");
+    }
+
+    let source = format!(
+        r#"//! # Feature Test Utils Module
+//!
+//! Verifies that `#[cfg(all(feature = "test-utils"))]` is recognized as production code.
+
+#[cfg(all(feature = "test-utils"))]
+mod helpers {{
+{}
+}}
+"#,
+        big_body
+    );
+
+    let res = linter::check_source(Path::new("src/feature_suite.rs"), &source);
+    assert!(
+        res.is_err(),
+        "Expected feature = 'test-utils' to be counted as production code and exceed Rule 2"
+    );
+    let err = res.unwrap_err();
+    assert!(err.contains("Rule 2"), "Error was: {}", err);
+}

@@ -2,6 +2,7 @@
 name = "rust-agent-native-template"
 version = "0.1.0"
 edition = "2024"
+rust-version = "1.88.0"
 authors = ["imwoo90 <wim90@kakao.com>"]
 license = "Apache-2.0"
 description = "An Agent-Native Rust project template engineered with compile-time linting, living LLM-Wiki context, and compiler-verified quality assurance."

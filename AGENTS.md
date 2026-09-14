@@ -53,7 +53,7 @@ Leveraging Rust 1.74+ package-level lint declarations, standard compiler and Cli
 
 ---
 
-## 3. Development Workflow (TDD)
+## 4. Development Workflow (TDD)
 
 When contributing or adding features, always adhere to the Test-Driven Development (TDD) cycle:
 
@@ -73,7 +73,7 @@ When contributing or adding features, always adhere to the Test-Driven Developme
 
 ---
 
-## 4. AI Agent Navigation Guide
+## 5. AI Agent Navigation Guide
 
 For AI Agents interacting with this repository:
 

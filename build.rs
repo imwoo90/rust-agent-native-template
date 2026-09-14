@@ -218,7 +218,8 @@ impl<'ast> Visit<'ast> for TestScopeCollector {
     }
 }
 
-/// Checks if attributes indicate a test configuration, avoiding token spacing artifacts.
+/// Checks if attributes indicate a test configuration, avoiding token spacing artifacts
+/// and accurately differentiating `test` predicates from `not(test)` or feature flags.
 fn is_cfg_test(attrs: &[syn::Attribute]) -> bool {
     attrs.iter().any(|attr| {
         if attr.path().is_ident("test") {
@@ -228,6 +229,7 @@ fn is_cfg_test(attrs: &[syn::Attribute]) -> bool {
             && let syn::Meta::List(list) = &attr.meta
         {
             let compact = list.tokens.to_string().replace(" ", "");
+            // Direct #[cfg(test)]
             if compact == "test"
                 || compact.starts_with("test,")
                 || compact.ends_with(",test")
@@ -235,10 +237,25 @@ fn is_cfg_test(attrs: &[syn::Attribute]) -> bool {
             {
                 return true;
             }
-            if (compact.starts_with("all(") || compact.starts_with("any("))
-                && !compact.contains("not(")
+            // Explicit not(test) is never test code
+            if compact.contains("not(test")
+                || compact.contains("not(all(test")
+                || compact.contains("not(any(test")
             {
-                return compact
+                return false;
+            }
+            // Strip string literals (e.g. feature="test-utils") to avoid false positives on features
+            let mut cleaned = String::new();
+            let mut in_str = false;
+            for c in compact.chars() {
+                if c == '"' {
+                    in_str = !in_str;
+                } else if !in_str {
+                    cleaned.push(c);
+                }
+            }
+            if cleaned.starts_with("all(") || cleaned.starts_with("any(") {
+                return cleaned
                     .split(|c: char| !c.is_alphanumeric() && c != '_')
                     .any(|w| w == "test");
             }
