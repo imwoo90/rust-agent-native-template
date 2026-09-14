@@ -25,19 +25,22 @@ Traditional codebases separate implementation from documentation and rely on man
 ## 🏛️ Core Architectural Pillars
 
 ### 1. 🛡️ Compile-Time Hard Linter (`build.rs`)
-Every `cargo check`, `cargo build`, and `cargo test` runs an automated AST/text inspection across `src/`:
+Every `cargo check`, `cargo build`, and `cargo test` runs an automated AST inspection across `src/`:
 * **Rule 1: File Header Requirement**: Every non-test `.rs` file must begin with a `//!` module header of **at least 100 characters** describing its purpose, responsibility, and architecture.
 * **Rule 2: Production Logical Code Limit**: Active production code (excluding comments, doc comments, and `#[cfg(test)]` modules) must not exceed **10,000 characters** (~250 SLOC). Preserves TDD incentives while forcing modular decomposition.
 * **Rule 3: Documentation Limit**: Documentation comments must not exceed **4,000 characters**. Prevents bloat and keeps context dense.
 * **Rule 4: Function Physical Limit**: Individual functions must not exceed **2,000 characters** (~40–50 lines). Enforces single responsibility and fits on a single screen/turn.
-* **Rule 5: Living LLM-Wiki: Public API Documentation**: Every public item (`pub fn`, `pub struct`, `pub enum`, `pub trait`, `pub type`, and public inherent method) must have `///` documentation comments.
-* **Rule 6: Panic-Free Production Guarantee**: Prohibits `.unwrap()` and `.expect()` in production code, mandating typed error handling (`Result<T, E>` and `?`).
 
-### 2. 🧠 Living LLM-Wiki (`mod.rs` = `index.md`)
+### 2. ⚙️ Standard Quality & Safety Lints (`Cargo.toml [lints]`)
+* **Living LLM-Wiki Public API Contract**: `missing_docs = "deny"` mandates executable doc comments (`///`) on all public interfaces.
+* **Panic-Free Production Guarantee**: `clippy::unwrap_used = "deny"` and `clippy::expect_used = "deny"` enforce typed `Result<T, E>` and the `?` operator in production.
+* **Real-Time Editor Checking**: Configured via `.vscode/settings.json` (`"rust-analyzer.check.command": "clippy"`).
+
+### 3. 🧠 Living LLM-Wiki (`mod.rs` = `index.md`)
 * Each directory represents a cohesive module domain whose `mod.rs` serves as the `index.md` architecture catalog.
 * Cross-module navigation uses native Rustdoc links (e.g., `[`[`Calculator`](crate::example::Calculator)`]`).
 
-### 3. 🧪 Test-Driven Quality (TDD)
+### 4. 🧪 Test-Driven Quality (TDD)
 * **Unit Tests**: Co-located within source files (`#[cfg(test)] mod tests`).
 * **Integration Tests**: Placed in `tests/` to verify public API contracts.
 * **Compiler-Verified Doctests**: Every public interface doc comment includes executable examples verified by `cargo test --doc`.

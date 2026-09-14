@@ -24,7 +24,7 @@ To prevent documentation drift and maximize signal-to-noise ratio in LLM context
 
 To keep files compact, modular, and optimized for LLM context windows, strict architectural limits are enforced during `cargo check`, `cargo build`, and `cargo test`:
 
-1. **Rule 1: File-Level Documentation Header (Min 100 Characters)**:
+1. **Rule 1: File-Level Living Wiki Header (Min 100 Characters)**:
    * Every non-test production `.rs` file must begin with a file-level doc comment (`//!`) of **at least 100 characters** describing its purpose, responsibilities, and architecture.
 2. **Rule 2: Production Logical Code Limit (Max 10,000 Characters)**:
    * The total character count of active production code lines (excluding comments, doc comments, empty lines, and `#[cfg(test)]` blocks) must be **under 10,000 characters** (approx. 200–300 lines of SLOC).
@@ -36,10 +36,18 @@ To keep files compact, modular, and optimized for LLM context windows, strict ar
 4. **Rule 4: Function Physical Size Limit (Max 2,000 Characters)**:
    * A single function (including its signature, body, comments, and braces) must be **under 2,000 characters** (approx. 40–50 physical lines).
    * Ensures every function fits cleanly on a single screen or within a single context window turn.
-5. **Rule 5: Living LLM-Wiki: Public API Documentation Required**:
-   * Every public interface (`pub fn`, `pub struct`, `pub enum`, `pub trait`, `pub type`, and public inherent method) must include outer doc comments (`///`) explaining its contract, parameters, and executable doctests.
-6. **Rule 6: Panic-Free Production Code Guarantee**:
-   * Prohibits `.unwrap()` and `.expect()` in production code. All production logic must propagate errors via typed `Result<T, E>` and the `?` operator. Non-panicking alternatives (`unwrap_or`, `unwrap_or_default`, `unwrap_or_else`) and test-scope unwraps are allowed.
+
+---
+
+## 3. Standard Quality & Safety Lints (Enforced via `Cargo.toml [lints]`)
+
+Leveraging Rust 1.74+ package-level lint declarations, standard compiler and Clippy lints are elevated to hard compilation errors:
+
+1. **`missing_docs = "deny"` (Rust Standard Lint)**:
+   * Enforces the Living LLM-Wiki contract: every public struct, enum, function, trait, and type alias must have outer doc comments (`///`).
+2. **`clippy::unwrap_used = "deny"` & `clippy::expect_used = "deny"` (Clippy Standard Lints)**:
+   * Prohibits `.unwrap()` and `.expect()` in production code, enforcing typed error handling (`Result<T, E>` and `?`).
+   * Editor real-time checking is configured via `.vscode/settings.json` (`"rust-analyzer.check.command": "clippy"`).
 
 ---
 

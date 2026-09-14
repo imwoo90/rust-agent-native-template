@@ -1,10 +1,12 @@
+#![allow(missing_docs)]
+
 use std::fs;
 use std::ops::RangeInclusive;
 use std::path::Path;
 use syn::spanned::Spanned;
 use syn::visit::Visit;
 
-// Architectural Limits (AGENTS.md Rules)
+// Agent-Native Architectural Limits (AGENTS.md Rules 1-4)
 const MIN_MODULE_DOC_CHARS: usize = 100;
 const MAX_LOGICAL_CODE_CHARS: usize = 10_000;
 const MAX_DOC_CHARS: usize = 4_000;
@@ -57,7 +59,7 @@ pub fn check_source(path: &Path, content: &str) -> Result<(), String> {
     let path_str = path.to_string_lossy();
     let is_test_file = path_str.contains("test");
 
-    // Pass 1: Extract test scopes (e.g. #[cfg(test)])
+    // Pass 1: Extract test scopes (e.g. #[cfg(test)]) to preserve TDD incentives
     let mut scope_collector = TestScopeCollector {
         test_line_ranges: Vec::new(),
     };
@@ -129,7 +131,7 @@ pub fn check_source(path: &Path, content: &str) -> Result<(), String> {
         ));
     }
 
-    // 3. Enforce File-Level Documentation (//! at least 100 characters) for production code (Rule 1)
+    // 3. Enforce File-Level Living Wiki Header (//! at least 100 characters) for production code (Rule 1)
     if !is_test_file {
         let mut module_doc_len = 0;
         for attr in &syn_file.attrs {
@@ -157,12 +159,10 @@ pub fn check_source(path: &Path, content: &str) -> Result<(), String> {
         }
     }
 
-    // 4. Pass 3: AST Inspection for Rules 4, 5, 6
-    let mut visitor = AgentNativeAstChecker {
+    // 4. Pass 3: AST Inspection for Function Physical Size (Rule 4)
+    let mut visitor = FunctionSizeChecker {
         path,
         source_lines: &lines,
-        is_test_file,
-        in_test_scope: is_test_file,
         errors: Vec::new(),
     };
     visitor.visit_file(&syn_file);
@@ -206,15 +206,14 @@ impl<'ast> Visit<'ast> for TestScopeCollector {
     }
 }
 
-struct AgentNativeAstChecker<'a> {
+/// Inspects functions across modules, impl blocks, and traits for physical character limits.
+struct FunctionSizeChecker<'a> {
     path: &'a Path,
     source_lines: &'a [&'a str],
-    is_test_file: bool,
-    in_test_scope: bool,
     errors: Vec<String>,
 }
 
-impl<'a> AgentNativeAstChecker<'a> {
+impl<'a> FunctionSizeChecker<'a> {
     fn check_fn_size(
         &mut self,
         fn_name: &str,
@@ -237,103 +236,17 @@ impl<'a> AgentNativeAstChecker<'a> {
             ));
         }
     }
-
-    fn check_public_doc(
-        &mut self,
-        item_type: &str,
-        name: &str,
-        vis: &syn::Visibility,
-        attrs: &[syn::Attribute],
-        span: proc_macro2::Span,
-    ) {
-        if self.in_test_scope || self.is_test_file {
-            return;
-        }
-
-        if matches!(vis, syn::Visibility::Public(_)) {
-            let has_doc = attrs.iter().any(|attr| {
-                matches!(attr.style, syn::AttrStyle::Outer) && attr.path().is_ident("doc")
-            });
-
-            if !has_doc {
-                self.errors.push(format!(
-                    "Rule: AGENTS.md Rule 5 (Living LLM-Wiki: Public API Documentation)\nLocation: {:?}:{}\nItem: Public {} `{}`\nConstraint: Every public interface must include documentation comments (///)\nAction: Add doc comments explaining purpose, parameters, return values, and executable doctests.",
-                    self.path, span.start().line, item_type, name
-                ));
-            }
-        }
-    }
 }
 
-impl<'ast, 'a> Visit<'ast> for AgentNativeAstChecker<'a> {
-    fn visit_item_mod(&mut self, node: &'ast syn::ItemMod) {
-        let was_in_test = self.in_test_scope;
-        if is_cfg_test(&node.attrs) {
-            self.in_test_scope = true;
-        }
-        syn::visit::visit_item_mod(self, node);
-        self.in_test_scope = was_in_test;
-    }
-
+impl<'ast, 'a> Visit<'ast> for FunctionSizeChecker<'a> {
     fn visit_item_fn(&mut self, node: &'ast syn::ItemFn) {
-        let was_in_test = self.in_test_scope;
-        if is_cfg_test(&node.attrs) {
-            self.in_test_scope = true;
-        }
-
         let fn_name = node.sig.ident.to_string();
-        self.check_public_doc(
-            "function",
-            &fn_name,
-            &node.vis,
-            &node.attrs,
-            node.sig.ident.span(),
-        );
         self.check_fn_size(&fn_name, node.sig.span(), node.block.span());
-
         syn::visit::visit_item_fn(self, node);
-        self.in_test_scope = was_in_test;
-    }
-
-    fn visit_item_struct(&mut self, node: &'ast syn::ItemStruct) {
-        let name = node.ident.to_string();
-        self.check_public_doc("struct", &name, &node.vis, &node.attrs, node.ident.span());
-        syn::visit::visit_item_struct(self, node);
-    }
-
-    fn visit_item_enum(&mut self, node: &'ast syn::ItemEnum) {
-        let name = node.ident.to_string();
-        self.check_public_doc("enum", &name, &node.vis, &node.attrs, node.ident.span());
-        syn::visit::visit_item_enum(self, node);
-    }
-
-    fn visit_item_trait(&mut self, node: &'ast syn::ItemTrait) {
-        let name = node.ident.to_string();
-        self.check_public_doc("trait", &name, &node.vis, &node.attrs, node.ident.span());
-        syn::visit::visit_item_trait(self, node);
-    }
-
-    fn visit_item_type(&mut self, node: &'ast syn::ItemType) {
-        let name = node.ident.to_string();
-        self.check_public_doc(
-            "type alias",
-            &name,
-            &node.vis,
-            &node.attrs,
-            node.ident.span(),
-        );
-        syn::visit::visit_item_type(self, node);
     }
 
     fn visit_impl_item_fn(&mut self, node: &'ast syn::ImplItemFn) {
         let fn_name = node.sig.ident.to_string();
-        self.check_public_doc(
-            "method",
-            &fn_name,
-            &node.vis,
-            &node.attrs,
-            node.sig.ident.span(),
-        );
         self.check_fn_size(&fn_name, node.sig.span(), node.block.span());
         syn::visit::visit_impl_item_fn(self, node);
     }
@@ -344,19 +257,6 @@ impl<'ast, 'a> Visit<'ast> for AgentNativeAstChecker<'a> {
             self.check_fn_size(&fn_name, node.sig.span(), block.span());
         }
         syn::visit::visit_trait_item_fn(self, node);
-    }
-
-    fn visit_expr_method_call(&mut self, node: &'ast syn::ExprMethodCall) {
-        if !self.in_test_scope && !self.is_test_file {
-            let method = node.method.to_string();
-            if method == "unwrap" || method == "expect" {
-                self.errors.push(format!(
-                    "Rule: AGENTS.md Rule 6 (Panic-Free Production Code Guarantee)\nLocation: {:?}:{}\nItem: Prohibited method call `.{method}()`\nConstraint: Production code must never panic at runtime\nAction: Use typed error handling (Result<T, E> and the '?' operator) instead of crashing at runtime.",
-                    self.path, node.method.span().start().line
-                ));
-            }
-        }
-        syn::visit::visit_expr_method_call(self, node);
     }
 }
 

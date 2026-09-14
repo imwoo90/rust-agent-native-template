@@ -1,3 +1,5 @@
+#![allow(missing_docs)]
+
 use rust_agent_native_template::Calculator;
 use rust_agent_native_template::example::calculator::CalculatorError;
 

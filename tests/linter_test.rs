@@ -1,3 +1,5 @@
+#![allow(missing_docs, clippy::unwrap_used, clippy::expect_used)]
+
 #[path = "../build.rs"]
 mod linter;
 
@@ -28,13 +30,45 @@ impl Sample {
 fn test_missing_file_header_fails_rule_1() {
     let source = r#"//! Short header
 
-/// A public function.
 pub fn run() {}
 "#;
     let res = linter::check_source(Path::new("src/sample.rs"), source);
     assert!(res.is_err());
     let err = res.unwrap_err();
     assert!(err.contains("Rule 1"), "Error was: {}", err);
+}
+
+#[test]
+fn test_excessive_logical_code_fails_rule_2() {
+    // Generate 20 functions of ~700 characters each (total > 14,000 chars, each function < 2,000 chars)
+    let mut big_body = String::new();
+    for f in 0..20 {
+        big_body.push_str(&format!("pub fn func_{}() {{\n", f));
+        for i in 0..30 {
+            big_body.push_str(&format!("    let _var_{}_{} = {};\n", f, i, i));
+        }
+        big_body.push_str("}\n\n");
+    }
+
+    let source = format!(
+        r#"//! # Excessive Code Module
+//!
+//! This module intentionally exceeds the 10,000-character logical code budget across multiple
+//! functions to verify that AGENTS.md Rule 2 triggers and halts compilation.
+
+{}
+"#,
+        big_body
+    );
+
+    let res = linter::check_source(Path::new("src/excessive.rs"), &source);
+    assert!(res.is_err());
+    let err = res.unwrap_err();
+    assert!(
+        err.contains("Rule 2"),
+        "Expected Rule 2 violation, got: {}",
+        err
+    );
 }
 
 #[test]
@@ -84,26 +118,31 @@ mod tests {{
 }
 
 #[test]
-fn test_braces_in_strings_and_comments_pass() {
-    let source = r#"//! # Braces In Strings And Comments Test Module
-//!
-//! Verifies that string literals containing braces (such as JSON mockups) and comments with braces
-//! do not distort the AST parser or cause false-positive function size errors.
+fn test_excessive_documentation_fails_rule_3() {
+    let mut big_doc = String::new();
+    for i in 0..80 {
+        big_doc.push_str(&format!(
+            "//! Documentation line {:03} with verbose explanation to exceed character limit.\n",
+            i
+        ));
+    }
 
-/// Generates a JSON string literal with braces.
-pub fn generate_json() -> &'static str {
-    // Note: { this opening brace in a comment } should not confuse the parser!
-    let _open_bracket = "{";
-    let _close_bracket = "}";
-    let _nested = "{ \"key\": [1, 2, { \"sub\": true }] }";
-    "done"
-}
-"#;
-    let res = linter::check_source(Path::new("src/json_test.rs"), source);
+    let source = format!(
+        r#"//! # Excessive Doc Module
+//!
+{}
+pub fn short_code() {{}}
+"#,
+        big_doc
+    );
+
+    let res = linter::check_source(Path::new("src/verbose.rs"), &source);
+    assert!(res.is_err());
+    let err = res.unwrap_err();
     assert!(
-        res.is_ok(),
-        "Expected braces in strings/comments to pass: {:?}",
-        res
+        err.contains("Rule 3"),
+        "Expected Rule 3 violation, got: {}",
+        err
     );
 }
 
@@ -120,11 +159,9 @@ fn test_large_function_in_impl_block_fails_rule_4() {
 //! Verifies that methods inside `impl` blocks exceeding 2,000 characters are correctly detected
 //! by the AST visitor and rejected per AGENTS.md Rule 4.
 
-/// An engine struct.
 pub struct Engine;
 
 impl Engine {{
-    /// An oversized method that violates Rule 4.
     pub fn oversized_method(&self) {{
 {}
     }}
@@ -144,177 +181,24 @@ impl Engine {{
 }
 
 #[test]
-fn test_public_struct_missing_doc_fails_rule_5() {
-    let source = r#"//! # Missing Doc Test Module
+fn test_braces_in_strings_and_comments_pass() {
+    let source = r#"//! # Braces In Strings And Comments Test Module
 //!
-//! This module intentionally verifies that public structs without documentation comments are properly
-//! detected and rejected by Rule 5 (Living LLM-Wiki).
+//! Verifies that string literals containing braces (such as JSON mockups) and comments with braces
+//! do not distort the AST parser or cause false-positive function size errors.
 
-pub struct UndocumentedStruct;
-"#;
-    let res = linter::check_source(Path::new("src/missing_doc.rs"), source);
-    assert!(res.is_err());
-    let err = res.unwrap_err();
-    assert!(
-        err.contains("Rule 5") && err.contains("UndocumentedStruct"),
-        "Expected Rule 5 violation, got: {}",
-        err
-    );
-}
-
-#[test]
-fn test_public_fn_missing_doc_fails_rule_5() {
-    let source = r#"//! # Missing Doc Test Module
-//!
-//! This module intentionally verifies that public functions without documentation comments are properly
-//! detected and rejected by Rule 5 (Living LLM-Wiki).
-
-pub fn undocumented_function() {}
-"#;
-    let res = linter::check_source(Path::new("src/missing_doc.rs"), source);
-    assert!(res.is_err());
-    let err = res.unwrap_err();
-    assert!(
-        err.contains("Rule 5") && err.contains("undocumented_function"),
-        "Expected Rule 5 violation, got: {}",
-        err
-    );
-}
-
-#[test]
-fn test_public_method_in_impl_missing_doc_fails_rule_5() {
-    let source = r#"//! # Missing Doc Test Module
-//!
-//! This module intentionally verifies that public methods in inherent impl blocks without documentation
-//! comments are properly detected and rejected by Rule 5 (Living LLM-Wiki).
-
-/// A documented struct.
-pub struct DocumentedStruct;
-
-impl DocumentedStruct {
-    pub fn undocumented_method(&self) {}
+pub fn generate_json() -> &'static str {
+    // Note: { this opening brace in a comment } should not confuse the parser!
+    let _open_bracket = "{";
+    let _close_bracket = "}";
+    let _nested = "{ \"key\": [1, 2, { \"sub\": true }] }";
+    "done"
 }
 "#;
-    let res = linter::check_source(Path::new("src/missing_doc.rs"), source);
-    assert!(res.is_err());
-    let err = res.unwrap_err();
-    assert!(
-        err.contains("Rule 5") && err.contains("undocumented_method"),
-        "Expected Rule 5 violation, got: {}",
-        err
-    );
-}
-
-#[test]
-fn test_private_items_do_not_require_doc() {
-    let source = r#"//! # Private Items Test Module
-//!
-//! Verifies that internal/private helper items do not require documentation comments.
-
-struct InternalHelper;
-
-impl InternalHelper {
-    fn internal_step(&self) {}
-}
-
-fn internal_run() {}
-"#;
-    let res = linter::check_source(Path::new("src/private.rs"), source);
-    assert!(res.is_ok(), "Expected private items to pass: {:?}", res);
-}
-
-#[test]
-fn test_production_unwrap_fails_rule_6() {
-    let source = r#"//! # Prohibited Unwrap Module
-//!
-//! Verifies that calling `.unwrap()` in production code is rejected by Rule 6.
-
-/// Performs an action with a dangerous unwrap call.
-pub fn risky_operation(opt: Option<i32>) -> i32 {
-    opt.unwrap()
-}
-"#;
-    let res = linter::check_source(Path::new("src/risky.rs"), source);
-    assert!(res.is_err());
-    let err = res.unwrap_err();
-    assert!(
-        err.contains("Rule 6") && err.contains(".unwrap()"),
-        "Expected Rule 6 violation, got: {}",
-        err
-    );
-}
-
-#[test]
-fn test_production_expect_fails_rule_6() {
-    let source = r#"//! # Prohibited Expect Module
-//!
-//! Verifies that calling `.expect()` in production code is rejected by Rule 6.
-
-/// Performs an action with a dangerous expect call.
-pub fn risky_operation(opt: Option<i32>) -> i32 {
-    opt.expect("must not be None")
-}
-"#;
-    let res = linter::check_source(Path::new("src/risky.rs"), source);
-    assert!(res.is_err());
-    let err = res.unwrap_err();
-    assert!(
-        err.contains("Rule 6") && err.contains(".expect()"),
-        "Expected Rule 6 violation, got: {}",
-        err
-    );
-}
-
-#[test]
-fn test_test_code_allows_unwrap_and_expect() {
-    let source = r#"//! # Safe Production With Tests Module
-//!
-//! Verifies that calling `.unwrap()` and `.expect()` inside `#[cfg(test)]` modules is allowed.
-
-/// Safe production logic.
-pub fn safe_calc(val: i32) -> Result<i32, ()> {
-    Ok(val * 2)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_in_test_scope() {
-        let res = safe_calc(10);
-        assert_eq!(res.unwrap(), 20);
-        assert_eq!(res.expect("should succeed"), 20);
-    }
-}
-"#;
-    let res = linter::check_source(Path::new("src/test_scope.rs"), source);
+    let res = linter::check_source(Path::new("src/json_test.rs"), source);
     assert!(
         res.is_ok(),
-        "Expected tests to allow unwrap/expect, got: {:?}",
-        res
-    );
-}
-
-#[test]
-fn test_safe_unwrap_alternatives_pass_in_production() {
-    let source = r#"//! # Safe Fallbacks Test Module
-//!
-//! Verifies that idiomatic non-panicking fallbacks like `unwrap_or`, `unwrap_or_default`,
-//! and `unwrap_or_else` pass cleanly in production code.
-
-/// Evaluates options safely without panicking.
-pub fn safe_fallbacks(opt: Option<i32>) -> i32 {
-    let a = opt.unwrap_or(0);
-    let b = opt.unwrap_or_default();
-    let c = opt.unwrap_or_else(|| 42);
-    a + b + c
-}
-"#;
-    let res = linter::check_source(Path::new("src/safe_fallbacks.rs"), source);
-    assert!(
-        res.is_ok(),
-        "Expected safe unwrap fallbacks to pass: {:?}",
+        "Expected braces in strings/comments to pass: {:?}",
         res
     );
 }
@@ -326,11 +210,9 @@ fn test_attributed_and_multiline_functions_pass() {
 //! Verifies that functions preceded by outer attributes (e.g. `#[inline]`, `#[allow(...)]`)
 //! and functions with multi-line signatures and where clauses are parsed accurately.
 
-/// A worker struct for background tasks.
 pub struct Worker;
 
 impl Worker {
-    /// Processes a generic job payload asynchronously.
     #[inline]
     #[allow(dead_code)]
     pub async fn process_job<T>(
