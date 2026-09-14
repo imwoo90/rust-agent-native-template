@@ -99,8 +99,10 @@ cd my-project
 git clone https://github.com/imwoo90/rust-agent-native-template.git my-project
 cd my-project
 
-# 2. Initialize and re-namespace to your project name in 1 second
-./scripts/init.sh my-project
+# 2. Initialize and re-namespace to your project name in 1 second:
+# Choose either:
+./scripts/init.sh my-project --clean  # Pristine empty scaffold for ANY project (e.g. Dioxus, Web, CLI)
+./scripts/init.sh my-project          # Retains calculator demo as living reference
 ```
 
 ### 2. Verify Your Environment

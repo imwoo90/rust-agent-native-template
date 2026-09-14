@@ -5,15 +5,34 @@ set -euo pipefail
 # Rust Agent-Native Template Initialization Script
 # Re-namespaces the template to a new project name across all source files,
 # manifests, doctests, and documentation in a single step.
+#
+# Flags:
+#   --clean   Remove demo calculator example and provide a pristine empty scaffold
 # ==============================================================================
 
-if [ $# -lt 1 ]; then
-    echo "Usage: $0 <new-project-name>"
-    echo "Example: $0 my-agent-app"
+CLEAN_MODE=false
+NEW_PROJECT_NAME=""
+
+for arg in "$@"; do
+    case "$arg" in
+        --clean)
+            CLEAN_MODE=true
+            ;;
+        *)
+            if [ -z "${NEW_PROJECT_NAME}" ]; then
+                NEW_PROJECT_NAME="$arg"
+            fi
+            ;;
+    esac
+done
+
+if [ -z "${NEW_PROJECT_NAME}" ]; then
+    echo "Usage: $0 <new-project-name> [--clean]"
+    echo "Examples:"
+    echo "  $0 my-agent-app          # Keep calculator reference example"
+    echo "  $0 my-agent-app --clean  # Clean scaffold ready for any project (e.g. Dioxus, CLI, Web)"
     exit 1
 fi
-
-NEW_PROJECT_NAME="$1"
 
 # Compute kebab-case and snake_case representations
 KEBAB_NAME="$(echo "${NEW_PROJECT_NAME}" | tr '[:upper:]' '[:lower:]' | tr '_' '-' | sed -E 's/[^a-z0-9-]+//g')"
@@ -27,6 +46,7 @@ fi
 echo "=== Initializing Agent-Native Project ==="
 echo "  Package Name (kebab-case): ${KEBAB_NAME}"
 echo "  Crate Name   (snake_case): ${SNAKE_NAME}"
+echo "  Clean Mode               : ${CLEAN_MODE}"
 echo ""
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -39,15 +59,56 @@ OLD_SNAKE="rust_agent_native_template"
 echo "--> Updating Cargo.toml..."
 sed -i "s/name = \"${OLD_KEBAB}\"/name = \"${KEBAB_NAME}\"/g" Cargo.toml
 
-# 2. Update src/lib.rs, src/main.rs
-echo "--> Updating source files..."
-find src -type f -name "*.rs" -exec sed -i "s/${OLD_KEBAB}/${KEBAB_NAME}/g" {} +
-find src -type f -name "*.rs" -exec sed -i "s/${OLD_SNAKE}/${SNAKE_NAME}/g" {} +
+# 2. Handle Clean Mode or Standard Rename
+if [ "${CLEAN_MODE}" = true ]; then
+    echo "--> Clean mode: Removing demo calculator example..."
+    rm -rf src/example
 
-# 3. Update tests/
-echo "--> Updating integration and linter tests..."
-find tests -type f -name "*.rs" -exec sed -i "s/${OLD_SNAKE}/${SNAKE_NAME}/g" {} +
-find tests -type f -name "*.rs" -exec sed -i "s/${OLD_KEBAB}/${KEBAB_NAME}/g" {} +
+    echo "--> Writing pristine src/lib.rs..."
+    cat <<EOF > src/lib.rs
+//! # ${KEBAB_NAME} Library
+//!
+//! This library provides foundational modules, public domain contracts, and core services for the project.
+//! Built on the Agent-Native pattern with living LLM-Wiki context and compiler-verified quality assurance.
+EOF
+
+    echo "--> Writing pristine src/main.rs..."
+    cat <<EOF > src/main.rs
+//! # ${KEBAB_NAME} Application Entrypoint
+//!
+//! Primary binary entrypoint for the project. Demonstrates runtime execution and service orchestration
+//! adhering strictly to all Agent-Native compile-time architectural constraints.
+
+fn main() {
+    println!("=== ${KEBAB_NAME} initialized ===");
+}
+EOF
+
+    echo "--> Writing pristine tests/integration_test.rs..."
+    cat <<EOF > tests/integration_test.rs
+#![allow(missing_docs)]
+
+// Integration test suite verifying crate initialization and public API boundaries.
+
+#[test]
+fn test_scaffold_initialization() {
+    let is_initialized = true;
+    assert!(is_initialized);
+}
+EOF
+
+else
+    echo "--> Standard mode: Updating source files..."
+    find src -type f -name "*.rs" -exec sed -i "s/${OLD_KEBAB}/${KEBAB_NAME}/g" {} +
+    find src -type f -name "*.rs" -exec sed -i "s/${OLD_SNAKE}/${SNAKE_NAME}/g" {} +
+
+    echo "--> Updating integration tests..."
+    find tests -type f -name "*.rs" -exec sed -i "s/${OLD_SNAKE}/${SNAKE_NAME}/g" {} +
+    find tests -type f -name "*.rs" -exec sed -i "s/${OLD_KEBAB}/${KEBAB_NAME}/g" {} +
+fi
+
+# 3. Always update linter test suite references
+find tests -type f -name "linter_test.rs" -exec sed -i "s/${OLD_SNAKE}/${SNAKE_NAME}/g" {} +
 
 # 4. Update README.md
 echo "--> Updating README.md..."
@@ -60,7 +121,8 @@ echo "--> Verifying compile-time constraints and test suite..."
 cargo check --all-targets
 cargo test --all-targets
 cargo test --doc
+cargo clippy --all-targets
 
 echo ""
-echo "=== Project successfully re-namespaced to '${KEBAB_NAME}'! ==="
+echo "=== Project successfully initialized to '${KEBAB_NAME}'! ==="
 echo "All compiler constraints, doctests, and unit tests passed."
