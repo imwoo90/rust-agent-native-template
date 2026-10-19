@@ -1127,7 +1127,45 @@ pub fn run() {}
     assert!(res.is_ok(), "Expected schema enforcement bypass when enforce_doc_schema=false: {:?}", res);
 }
 
+#[test]
+fn test_schema_tag_outside_search_tags_section_fails() {
+    // Hashtag appears in Overview, while ## Search Tags has no hashtag. Must fail!
+    let source = r#"//! # Test Module
+//!
+//! ## Overview
+//! Valid header with more than 100 characters mentioning #fake_tag in overview instead of search tags.
+//!
+//! ## Search Tags
+//! plain_word_without_hash
 
+pub fn run() {}
+"#;
+    let res = linter::check_source(Path::new("src/spoofed_tag.rs"), source);
+    assert!(res.is_err(), "Expected hashtag outside ## Search Tags to fail: {:?}", res);
+    let err = res.unwrap_err();
+    assert!(err.contains("Living Wiki Schema: Missing Search Tags"), "Got: {}", err);
+}
 
+#[test]
+fn test_schema_submodule_outside_submodules_section_fails() {
+    // Submodule `[child_b]` is mentioned in Overview, but omitted from `## Submodules`. Must fail!
+    let source = r#"//! # Test Catalog Module
+//!
+//! ## Overview
+//! Coordinates [`child_a`] and [`child_b`] across the domain with more than 100 characters.
+//!
+//! ## Submodules
+//! - [`child_a`]: First child module.
+//!
+//! ## Search Tags
+//! #catalog, #submodules
 
+pub mod child_a;
+pub mod child_b;
+"#;
+    let res = linter::check_source(Path::new("src/parent/mod.rs"), source);
+    assert!(res.is_err(), "Expected submodule omitted from ## Submodules section to fail: {:?}", res);
+    let err = res.unwrap_err();
+    assert!(err.contains("Living Wiki Schema: Submodule Catalog Drift"), "Got: {}", err);
+}
 

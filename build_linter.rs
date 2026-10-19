@@ -688,31 +688,70 @@ pub fn validate_doc_schema(
     doc_lines: &[String],
     syn_file: &syn::File,
 ) -> Result<(), String> {
-    let doc_text = doc_lines.join("\n");
+    let mut overview_lines = Vec::new();
+    let mut tags_lines = Vec::new();
+    let mut submodules_lines = Vec::new();
 
-    // 1. Enforce ## Overview
-    let has_overview = doc_lines.iter().any(|l| {
-        let t = l.trim();
-        t.starts_with("## Overview") || t.starts_with("# Overview")
-    });
+    let mut has_overview_header = false;
+    let mut has_tags_header = false;
+    let mut has_submodules_header = false;
 
-    if !has_overview {
+    enum Section {
+        None,
+        Overview,
+        Tags,
+        Submodules,
+        Other,
+    }
+
+    let mut current_section = Section::None;
+
+    for line in doc_lines {
+        let t = line.trim();
+        if t.starts_with("## ") || t.starts_with("# ") {
+            if t.starts_with("## Overview") || t.starts_with("# Overview") {
+                has_overview_header = true;
+                current_section = Section::Overview;
+            } else if t.starts_with("## Search Tags")
+                || t.starts_with("# Search Tags")
+                || t.starts_with("## Tags")
+                || t.starts_with("# Tags")
+            {
+                has_tags_header = true;
+                current_section = Section::Tags;
+            } else if t.starts_with("## Submodules")
+                || t.starts_with("# Submodules")
+                || t.starts_with("## Modules")
+                || t.starts_with("# Modules")
+                || t.starts_with("## Module Components")
+            {
+                has_submodules_header = true;
+                current_section = Section::Submodules;
+            } else {
+                current_section = Section::Other;
+            }
+            continue;
+        }
+
+        match current_section {
+            Section::Overview => overview_lines.push(t),
+            Section::Tags => tags_lines.push(t),
+            Section::Submodules => submodules_lines.push(t),
+            Section::None | Section::Other => {}
+        }
+    }
+
+    // 1. Enforce ## Overview with non-empty content
+    let has_overview_content = overview_lines.iter().any(|l| !l.is_empty());
+    if !has_overview_header || !has_overview_content {
         return Err(format!(
             "Rule: AGENTS.md Rule 1 (Living Wiki Schema: Missing Overview)\nLocation: {:?}:1\nRequirement: Module doc (`//!`) must contain a `## Overview` section describing its single responsibility.\nAction: Add `## Overview` followed by a concise 1-2 sentence description at the top of the file.",
             path
         ));
     }
 
-    // 2. Enforce ## Search Tags with at least one `#tag`
-    let has_tags_header = doc_lines.iter().any(|l| {
-        let t = l.trim();
-        t.starts_with("## Search Tags")
-            || t.starts_with("# Search Tags")
-            || t.starts_with("## Tags")
-            || t.starts_with("# Tags")
-    });
-
-    let has_tag_keyword = doc_lines.iter().any(|l| {
+    // 2. Enforce ## Search Tags with at least one `#tag` strictly inside the Search Tags section
+    let has_tag_keyword = tags_lines.iter().any(|l| {
         l.split_whitespace().any(|word| {
             let clean = word.trim_matches(|c: char| !c.is_alphanumeric() && c != '#' && c != '-' && c != '_');
             clean.starts_with('#') && !clean.starts_with("##") && clean.len() > 1
@@ -729,23 +768,15 @@ pub fn validate_doc_schema(
     // 3. Enforce ## Submodules catalog if external submodules are declared
     let mut external_submodules = Vec::new();
     for item in &syn_file.items {
-        if let syn::Item::Mod(m) = item {
-            if !is_cfg_test(&m.attrs) && m.content.is_none() {
-                external_submodules.push(m.ident.to_string());
-            }
+        if let syn::Item::Mod(m) = item
+            && !is_cfg_test(&m.attrs)
+            && m.content.is_none()
+        {
+            external_submodules.push(m.ident.to_string());
         }
     }
 
     if !external_submodules.is_empty() {
-        let has_submodules_header = doc_lines.iter().any(|l| {
-            let t = l.trim();
-            t.starts_with("## Submodules")
-                || t.starts_with("# Submodules")
-                || t.starts_with("## Modules")
-                || t.starts_with("# Modules")
-                || t.starts_with("## Module Components")
-        });
-
         if !has_submodules_header {
             return Err(format!(
                 "Rule: AGENTS.md Rule 1 (Living Wiki Schema: Missing Submodules Catalog)\nLocation: {:?}:1\nRequirement: Module declares child submodules via `mod <name>;` but is missing a `## Submodules` catalog.\nAction: Add a `## Submodules` section with 1-line single-responsibility summaries for each child submodule.",
@@ -753,15 +784,16 @@ pub fn validate_doc_schema(
             ));
         }
 
+        let submodules_text = submodules_lines.join("\n");
         for submod in &external_submodules {
             let bracketed1 = format!("[`{}`]", submod);
             let bracketed2 = format!("[{}]", submod);
             let list_entry1 = format!("- {}:", submod);
             let list_entry2 = format!("- `{}`:", submod);
-            if !doc_text.contains(&bracketed1)
-                && !doc_text.contains(&bracketed2)
-                && !doc_text.contains(&list_entry1)
-                && !doc_text.contains(&list_entry2)
+            if !submodules_text.contains(&bracketed1)
+                && !submodules_text.contains(&bracketed2)
+                && !submodules_text.contains(&list_entry1)
+                && !submodules_text.contains(&list_entry2)
             {
                 return Err(format!(
                     "Rule: AGENTS.md Rule 1 (Living Wiki Schema: Submodule Catalog Drift)\nLocation: {:?}:1\nRequirement: Submodule `{}` is declared via `mod {};` but not listed in the `## Submodules` catalog.\nAction: Add `- [`{}`]: 1-line single-responsibility summary` under `## Submodules`.",
@@ -773,4 +805,5 @@ pub fn validate_doc_schema(
 
     Ok(())
 }
+
 

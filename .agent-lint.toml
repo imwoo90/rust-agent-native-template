@@ -9,6 +9,9 @@
 # Rule 1: Minimum characters required in module-level `//!` living-wiki header.
 min_module_doc_chars = 100
 
+# Rule 1b: Enforce structured Living Wiki schema (## Overview, ## Search Tags, ## Submodules).
+enforce_doc_schema = true
+
 # Rule 2: Maximum active production code characters per file (excluding tests & comments).
 max_logical_code_chars = 10000
 
