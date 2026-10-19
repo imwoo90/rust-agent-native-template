@@ -6,7 +6,7 @@
 //! and strict quality verification.
 //!
 //! ## Submodules
-//! - [`example`]: Demonstrates modular directory layout, intra-doc links, and executable doctests.
+//! - [`example`] (`example/mod.rs`): Demonstrates modular directory layout, intra-doc links, and executable doctests.
 //!
 //! ## Search Tags
 //! #agent-native, #template, #living-wiki, #architecture

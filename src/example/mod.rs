@@ -6,7 +6,7 @@
 //! data flows, and public interface re-exports.
 //!
 //! ## Submodules
-//! - [`calculator`]: Core calculation engine providing verified basic arithmetic operations.
+//! - [`calculator`] (`calculator.rs`): Core calculation engine providing verified basic arithmetic operations.
 //!
 //! ## Search Tags
 //! #example, #calculator, #arithmetic

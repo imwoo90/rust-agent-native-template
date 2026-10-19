@@ -785,6 +785,7 @@ pub fn validate_doc_schema(
         }
 
         let submodules_text = submodules_lines.join("\n");
+        let parent_dir = path.parent();
         for submod in &external_submodules {
             let bracketed1 = format!("[`{}`]", submod);
             let bracketed2 = format!("[{}]", submod);
@@ -796,9 +797,29 @@ pub fn validate_doc_schema(
                 && !submodules_text.contains(&list_entry2)
             {
                 return Err(format!(
-                    "Rule: AGENTS.md Rule 1 (Living Wiki Schema: Submodule Catalog Drift)\nLocation: {:?}:1\nRequirement: Submodule `{}` is declared via `mod {};` but not listed in the `## Submodules` catalog.\nAction: Add `- [`{}`]: 1-line single-responsibility summary` under `## Submodules`.",
-                    path, submod, submod, submod
+                    "Rule: AGENTS.md Rule 1 (Living Wiki Schema: Submodule Catalog Drift)\nLocation: {:?}:1\nRequirement: Submodule `{}` is declared via `mod {};` but not listed in the `## Submodules` catalog.\nAction: Add `- [`{}`] (`{}.rs` or `{}/mod.rs`): 1-line single-responsibility summary` under `## Submodules`.",
+                    path, submod, submod, submod, submod, submod
                 ));
+            }
+
+            // Enforce explicit physical path disambiguation (`submod.rs` vs `submod/mod.rs`) when files exist on disk
+            if let Some(dir) = parent_dir {
+                let dir_mod_path = dir.join(submod).join("mod.rs");
+                let leaf_rs_path = dir.join(format!("{}.rs", submod));
+                let expected_dir_token = format!("{}/mod.rs", submod);
+                let expected_leaf_token = format!("{}.rs", submod);
+
+                if dir_mod_path.is_file() && !submodules_text.contains(&expected_dir_token) {
+                    return Err(format!(
+                        "Rule: AGENTS.md Rule 1 (Living Wiki Schema: Ambiguous Submodule Path)\nLocation: {:?}:1\nRequirement: Submodule `{}` resolves to directory module `{}` on disk, so its `## Submodules` catalog entry must explicitly include `({})` to prevent agent 404 navigation errors.\nAction: Update the catalog entry to `- [`{}`] (`{}`): 1-line single-responsibility summary`.",
+                        path, submod, expected_dir_token, expected_dir_token, submod, expected_dir_token
+                    ));
+                } else if leaf_rs_path.is_file() && !submodules_text.contains(&expected_leaf_token) {
+                    return Err(format!(
+                        "Rule: AGENTS.md Rule 1 (Living Wiki Schema: Ambiguous Submodule Path)\nLocation: {:?}:1\nRequirement: Submodule `{}` resolves to leaf file `{}` on disk, so its `## Submodules` catalog entry must explicitly include `({})` to prevent agent 404 navigation errors.\nAction: Update the catalog entry to `- [`{}`] (`{}`): 1-line single-responsibility summary`.",
+                        path, submod, expected_leaf_token, expected_leaf_token, submod, expected_leaf_token
+                    ));
+                }
             }
         }
     }

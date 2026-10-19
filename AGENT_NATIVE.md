@@ -14,8 +14,8 @@ To prevent documentation rot and maximize the signal-to-noise ratio (SNR) in LLM
    * Every directory's `mod.rs` acts as the `index.md` (table of contents and architectural map) for that domain.
    * `mod.rs` headers MUST provide:
      - `## Overview`: High-level domain responsibility in 1-2 concise sentences.
-     - `## Submodules`: Table of contents linking each submodule (`- [`[`submodule`]`]: ...`) with a **1-line single-responsibility summary**. This allows AI agents to navigate to the exact file in $O(\log N)$ steps without opening every child file.
-     - `## Search Tags`: Comma-separated search keywords (`#tag1, #tag2`) for fast deterministic grep.
+      - `## Submodules`: Table of contents linking each submodule along with its explicit relative physical path (`- [`[`submodule`]`] (\`submodule.rs\`): ...` for leaf files, or `- [`[`submodule`]`] (\`submodule/mod.rs\`): ...` for directory modules) and a **1-line single-responsibility summary**. Explicit path disambiguation (`foo.rs` vs `foo/mod.rs`) eliminates 404 file-not-found round-trips and allows AI agents to navigate to the exact file in $O(\log N)$ steps without opening every child file.
+      - `## Search Tags`: Comma-separated search keywords (`#tag1, #tag2`) for fast deterministic grep.
 2. **Compiler-Verified Documentation**:
    * Never write documentation that cannot be compiled. Structs, traits, and public functions must use standard doc comments (`///`) with executable code examples (`doctests`).
    * When running `cargo test`, the compiler executes all doctests, guaranteeing documentation never becomes obsolete.
@@ -35,7 +35,7 @@ To prevent monoliths and keep files optimized for LLM context windows, strict AS
    * **Compile-Time Schema Enforcement (`build_linter.rs`)**:
      - `## Overview`: Mandatory for all production files. Details component responsibility in 1-2 concise sentences.
      - `## Search Tags`: Mandatory for all production files. Must include deterministic hashtags (e.g. `#keyword`).
-     - `## Submodules`: Mandatory for any module declaring child submodules via `mod <name>;`. Every declared submodule must be documented with a 1-line summary; omitting a submodule triggers a compilation error (zero catalog drift).
+     - `## Submodules`: Mandatory for any module declaring child submodules via `mod <name>;`. Every declared submodule must be documented with its explicit relative path (`(<name>.rs)` or `(<name>/mod.rs)`) and a 1-line summary; omitting a submodule or mismatching its on-disk path (`<name>.rs` vs `<name>/mod.rs`) triggers a compilation error (zero catalog or path drift).
    * Schema enforcement is enabled by default (`enforce_doc_schema = true`), configurable via `.agent-lint.toml`.
 2. **Rule 2: Production Logical Code Limit (Max 10,000 Characters)**:
    * The character count of active production code (excluding comments, doc comments, blank lines, and `#[cfg(test)]` modules) must not exceed **10,000 characters** (~200–300 lines of SLOC).
@@ -95,7 +95,7 @@ When implementing features or bug fixes, always adhere to the verification cycle
 
 For AI coding agents interacting with an Agent-Native repository:
 
-1. **Entry Points**: Always start with `AGENTS.md` and `README.md` to grasp project guidelines, domain architecture, and verification commands.
-2. **Module Indexing**: Treat `mod.rs` in any directory as the module's architecture map. Read the `//!` header to understand submodules and dependencies before diving into child files.
-3. **Deterministic Traversal**: Follow compile-checked intra-doc links (`[Type]`) to traverse dependencies deterministically without blind full-codebase searching.
+1. **Entry Points**: Always start with `AGENTS.md` and the crate root (`src/main.rs` or `src/lib.rs`) to grasp top-level domain architecture and verification commands.
+2. **Zero-404 Module Indexing (`mod.rs = index.md`)**: Treat `mod.rs` in any directory as the module's architecture map. Read its `## Submodules` catalog to see the exact relative path (`(foo.rs)` vs `(foo/mod.rs)`) and 1-line responsibility of each child. Open only the relevant target files in parallel and skip unrelated sibling modules.
+3. **Deterministic Traversal**: Follow compile-checked intra-doc links (`[Type]`) and `#tag` search tags to traverse dependencies deterministically without blind full-codebase searching.
 4. **Pre-commit Verification**: Never consider a task complete without passing the verification commands specified in the project's `AGENTS.md`.

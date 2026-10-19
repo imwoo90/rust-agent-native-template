@@ -1169,3 +1169,68 @@ pub mod child_b;
     assert!(err.contains("Living Wiki Schema: Submodule Catalog Drift"), "Got: {}", err);
 }
 
+#[test]
+fn test_schema_ambiguous_submodule_path_fails_and_explicit_passes() {
+    let temp_dir = std::env::temp_dir().join(format!(
+        "agent_lint_test_submod_path_{}",
+        std::process::id()
+    ));
+    let _ = fs::create_dir_all(temp_dir.join("child_dir"));
+    let mod_rs = temp_dir.join("mod.rs");
+    let _ = fs::write(temp_dir.join("child_leaf.rs"), "pub fn a() {}");
+    let _ = fs::write(temp_dir.join("child_dir").join("mod.rs"), "pub fn b() {}");
+
+    // 1. Missing physical path annotations -> should fail with Ambiguous Submodule Path
+    let ambiguous_source = r#"//! # Test Catalog Module
+//!
+//! ## Overview
+//! Valid header with more than 100 characters to pass rule 1 length check, testing path disambiguation.
+//!
+//! ## Submodules
+//! - [`child_leaf`]: Leaf module without explicit .rs path.
+//! - [`child_dir`]: Directory module without explicit /mod.rs path.
+//!
+//! ## Search Tags
+//! #catalog, #submodules
+
+pub mod child_leaf;
+pub mod child_dir;
+"#;
+    let res_fail = linter::check_source(&mod_rs, ambiguous_source);
+    assert!(
+        res_fail.is_err(),
+        "Expected ambiguous submodule path to fail: {:?}",
+        res_fail
+    );
+    let err = res_fail.unwrap_err();
+    assert!(
+        err.contains("Living Wiki Schema: Ambiguous Submodule Path"),
+        "Got: {}",
+        err
+    );
+
+    // 2. Explicit physical path annotations -> should pass
+    let explicit_source = r#"//! # Test Catalog Module
+//!
+//! ## Overview
+//! Valid header with more than 100 characters to pass rule 1 length check, testing path disambiguation.
+//!
+//! ## Submodules
+//! - [`child_leaf`] (`child_leaf.rs`): Leaf module with explicit .rs path.
+//! - [`child_dir`] (`child_dir/mod.rs`): Directory module with explicit /mod.rs path.
+//!
+//! ## Search Tags
+//! #catalog, #submodules
+
+pub mod child_leaf;
+pub mod child_dir;
+"#;
+    let res_ok = linter::check_source(&mod_rs, explicit_source);
+    let _ = fs::remove_dir_all(&temp_dir);
+    assert!(
+        res_ok.is_ok(),
+        "Expected explicit submodule path annotations to pass: {:?}",
+        res_ok
+    );
+}
+
