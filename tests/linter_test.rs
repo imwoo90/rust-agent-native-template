@@ -842,6 +842,7 @@ fn test_load_config_parses_agent_lint_toml() {
     assert_eq!(config.max_inline_test_chars, 5_000);
     assert_eq!(config.max_doc_chars, 4_000);
     assert_eq!(config.max_function_chars, 2_000);
+    assert_eq!(config.max_ui_component_chars, 3_500);
 }
 
 #[test]
@@ -854,6 +855,7 @@ fn test_custom_config_enforced_in_check_source() {
         max_inline_test_chars: 5_000,
         max_doc_chars: 4_000,
         max_function_chars: 2_000,
+        max_ui_component_chars: 3_500,
     };
 
     let source = r#"//! # Strict Config Test Module
@@ -1279,5 +1281,71 @@ pub fn bloated_signature(a: i32, b: i32, c: i32, d: i32, e: i32, f: i32, g: i32,
         err
     );
 }
+
+#[test]
+fn test_declarative_ui_component_rule_4b_allowance_and_ceiling() {
+    // Build ~2,700 chars of Tailwind-heavy UI markup (> 2,000 normal limit, <= 3,500 UI component limit)
+    let mut tailwind_nodes = String::new();
+    for i in 0..18 {
+        tailwind_nodes.push_str(&format!(
+            "        div {{ class: \"flex items-center justify-between px-4 py-2 bg-surface-dark border border-white/10 rounded-lg shadow-sm item-{}\", \"Label {}\" }}\n",
+            i, i
+        ));
+    }
+
+    // 1. Inside a declarative rsx! / #[component] function (~2,600 chars) -> MUST PASS Rule 4b (<= 3,500)
+    let ui_ok_source = format!(
+        r#"//! # Declarative UI Component Test Module
+//!
+//! ## Overview
+//! Verifies that declarative UI components (`#[component]` / `rsx!`) are allowed up to 3,500 chars (Rule 4b).
+//!
+//! ## Search Tags
+//! #test, #linter, #ui-component
+
+pub fn render_view() {{
+    let _tree = rsx! {{
+{}
+    }};
+}}
+"#,
+        tailwind_nodes
+    );
+    let res_ok = linter::check_source(Path::new("src/ui_view.rs"), &ui_ok_source);
+    assert!(
+        res_ok.is_ok(),
+        "Expected ~2,600-char rsx! UI function to pass Rule 4b (3,500 ceiling): {:?}",
+        res_ok
+    );
+
+    // 2. Exceeding 3,500 chars even in rsx! -> MUST FAIL Rule 4b
+    let mut huge_tailwind = tailwind_nodes.clone();
+    huge_tailwind.push_str(&tailwind_nodes);
+    let ui_fail_source = format!(
+        r#"//! # Oversized UI Component Test Module
+//!
+//! ## Overview
+//! Verifies that declarative UI components exceeding 3,500 characters still trigger Rule 4b.
+//!
+//! ## Search Tags
+//! #test, #linter, #ui-component
+
+pub fn oversized_view() {{
+    let _tree = rsx! {{
+{}
+    }};
+}}
+"#,
+        huge_tailwind
+    );
+    let res_fail = linter::check_source(Path::new("src/ui_oversized.rs"), &ui_fail_source);
+    assert!(
+        res_fail.is_err(),
+        "Expected >3,500-char rsx! UI function to fail Rule 4b: {:?}",
+        res_fail
+    );
+    assert!(res_fail.unwrap_err().contains("Rule 4b"));
+}
+
 
 

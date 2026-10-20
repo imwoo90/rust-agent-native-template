@@ -51,9 +51,9 @@ To prevent monoliths and keep files optimized for LLM context windows, strict AS
 4. **Rule 3: File Documentation Limit (Max 4,000 Characters)**:
    * Total character count of documentation comments (`//`, `///`, `//!`, `/* */`) must not exceed **4,000 characters** (~50–80 lines).
    * Keeps descriptions concise and high-signal, preventing LLM prompt bloat.
-5. **Rule 4: Function Physical Size & Parameter Discipline (Max 2,000 Characters)**:
-   * A single function (production or test, including signature, body, comments, and braces) must not exceed **2,000 characters** (~40–50 physical lines).
-   * Applies equally to imperative functions and declarative UI components (e.g. Dioxus `#[component]` / `rsx!`), enforcing Atomic Design sub-component decomposition rather than monolithic DOM trees.
+5. **Rule 4: Function Physical Size & Parameter Discipline (Max 2,000 Chars / UI Components Max 3,500 Chars)**:
+   * A single imperative logic function (production or test, including signature, body, comments, and braces) must not exceed **2,000 characters** (~40–50 physical lines).
+   * **Rule 4b (Declarative UI Component Allowance — Max 3,500 Characters)**: Functions annotated with `#[component]` or containing declarative UI markup macros (`rsx!`, `html!`, `view!`) have an elevated ceiling of **3,500 characters** (`max_ui_component_chars = 3500` in `.agent-lint.toml`). Because declarative markup has low cyclomatic complexity (`CC ≈ 1`) while utility CSS strings (e.g. Tailwind `class: "..."`) consume 40–60% of the character budget, this prevents artificial micro-fragmentation of cohesive UI views while still blocking monolithic God Components.
    * *Strict Enforcement (No Escape Hatches)*: Functions and `impl` blocks cannot bypass structural complexity limits via `#[allow(clippy::too_many_lines)]` or `#[allow(clippy::too_many_arguments)]`. When decomposing functions, encapsulate related arguments into a cohesive context or accumulator struct rather than passing 8+ primitive parameters.
 6. **Rule 5: Anti-Code-Golfing & Anti-Shallow-Module Principles**:
    * *Anti-Code-Golfing*: Never compress variable names (e.g. `transaction_context` -> `tc`), eliminate idiomatic whitespace/newlines, or abuse macros to artificially circumvent character limits.

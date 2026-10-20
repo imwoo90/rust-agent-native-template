@@ -25,8 +25,10 @@ pub struct LinterConfig {
     pub max_inline_test_chars: usize,
     /// Maximum documentation characters per file (Rule 3).
     pub max_doc_chars: usize,
-    /// Maximum physical characters per individual function (Rule 4).
+    /// Maximum physical characters per individual logic function (Rule 4).
     pub max_function_chars: usize,
+    /// Maximum physical characters for declarative UI components (`#[component]` / `rsx!`) (Rule 4b).
+    pub max_ui_component_chars: usize,
 }
 
 impl Default for LinterConfig {
@@ -38,6 +40,7 @@ impl Default for LinterConfig {
             max_inline_test_chars: 5_000,
             max_doc_chars: 4_000,
             max_function_chars: 2_000,
+            max_ui_component_chars: 3_500,
         }
     }
 }
@@ -72,6 +75,7 @@ pub fn load_config(root_dir: &Path) -> LinterConfig {
                     "max_inline_test_chars" => config.max_inline_test_chars = num,
                     "max_doc_chars" => config.max_doc_chars = num,
                     "max_function_chars" => config.max_function_chars = num,
+                    "max_ui_component_chars" => config.max_ui_component_chars = num,
                     _ => {}
                 }
             }
@@ -226,13 +230,14 @@ pub fn check_source_with_config(
         }
     }
 
-    // 4. Pass 3: AST Inspection for Function Physical Size (Rule 4)
+    // 4. Pass 3: AST Inspection for Function Physical Size (Rule 4 & Rule 4b)
     if !is_test_file {
         let mut visitor = FunctionSizeChecker {
             path,
             source_lines: &lines,
             is_test_file,
             max_function_chars: config.max_function_chars,
+            max_ui_component_chars: config.max_ui_component_chars,
             errors: Vec::new(),
         };
         visitor.visit_file(&syn_file);
@@ -351,6 +356,7 @@ struct FunctionSizeChecker<'a> {
     source_lines: &'a [&'a str],
     is_test_file: bool,
     max_function_chars: usize,
+    max_ui_component_chars: usize,
     errors: Vec<String>,
 }
 
@@ -408,11 +414,35 @@ impl<'a> FunctionSizeChecker<'a> {
         }
 
         let fn_chars = calculate_span_chars(self.source_lines, start, end);
-        if fn_chars > self.max_function_chars {
-            let over = fn_chars - self.max_function_chars;
+        let has_component_attr = attrs.iter().any(|attr| {
+            attr.path()
+                .segments
+                .last()
+                .is_some_and(|seg| seg.ident == "component")
+        });
+        let end_line_idx = end.line.min(self.source_lines.len());
+        let has_ui_macro = self.source_lines[(start.line - 1)..end_line_idx]
+            .iter()
+            .any(|line| {
+                line.contains("rsx!") || line.contains("html!") || line.contains("view!")
+            });
+        let is_ui_component = has_component_attr || has_ui_macro;
+        let limit = if is_ui_component {
+            self.max_ui_component_chars
+        } else {
+            self.max_function_chars
+        };
+
+        if fn_chars > limit {
+            let over = fn_chars - limit;
+            let rule_label = if is_ui_component {
+                "Rule 4b (Declarative UI Component Physical Size Limit)"
+            } else {
+                "Rule 4 (Function Physical Size Limit)"
+            };
             self.errors.push(format!(
-                "Rule: AGENTS.md Rule 4 (Function Physical Size Limit)\nLocation: {:?}:{}\nItem: Function `{}`\nLimit: Maximum {} characters\nActual: {} characters (+{} over limit)\nAction: Refactor into smaller helper functions. To adjust ceilings, edit `.agent-lint.toml`.",
-                self.path, start.line, fn_name, self.max_function_chars, fn_chars, over
+                "Rule: AGENTS.md {}\nLocation: {:?}:{}\nItem: Function `{}`\nLimit: Maximum {} characters\nActual: {} characters (+{} over limit)\nAction: Refactor into smaller helper functions or sub-components. To adjust ceilings, edit `.agent-lint.toml`.",
+                rule_label, self.path, start.line, fn_name, limit, fn_chars, over
             ));
         }
     }
