@@ -151,8 +151,16 @@ pub fn check_source_with_config(
 
     // Pass 2: Calculate character metrics (Rules 2, 2b & 3) with string/comment-aware scanning
     let lines: Vec<&str> = content.lines().collect();
-    let (prod_logical_code_chars, doc_chars, inline_test_chars) =
+    let (prod_logical_code_chars, doc_chars, inline_test_chars, non_english_comment_line) =
         scan_code_and_comments(&lines, is_test_file, &scope_collector.test_line_ranges);
+
+    // 0b. Enforce English-Only Documentation & Comments (Rule 1)
+    if let Some(bad_line) = non_english_comment_line {
+        return Err(format!(
+            "Rule: AGENTS.md Rule 1 (English-Only Documentation & Comments)\nLocation: {:?}:{}\nRequirement: All documentation (`//!`, `///`) and inline comments (`//`, `/* */`) must be written strictly in concise English to maximize LLM tokenizer efficiency and lexical consistency.\nAction: Rewrite the non-English comment at line {} in English.",
+            path, bad_line, bad_line
+        ));
+    }
 
     // 1. Check production logical code limit (Rule 2)
     if prod_logical_code_chars > config.max_logical_code_chars {
@@ -336,7 +344,8 @@ fn is_cfg_test(attrs: &[syn::Attribute]) -> bool {
     })
 }
 
-/// Inspects functions across modules, impl blocks, and traits for physical character limits.
+/// Inspects functions across modules, impl blocks, and traits for physical character limits
+/// and disallowed complexity escape hatches (`#[allow(clippy::too_many_lines)]`, `#[allow(clippy::too_many_arguments)]`).
 struct FunctionSizeChecker<'a> {
     path: &'a Path,
     source_lines: &'a [&'a str],
@@ -345,7 +354,36 @@ struct FunctionSizeChecker<'a> {
     errors: Vec<String>,
 }
 
+fn find_disallowed_escape_hatch(attrs: &[syn::Attribute]) -> Option<(usize, &'static str)> {
+    for attr in attrs {
+        if attr.path().is_ident("allow")
+            && let syn::Meta::List(list) = &attr.meta
+        {
+            let tokens = list.tokens.to_string().replace(' ', "");
+            if tokens.contains("too_many_arguments") {
+                return Some((attr.span().start().line.max(1), "clippy::too_many_arguments"));
+            }
+            if tokens.contains("too_many_lines") {
+                return Some((attr.span().start().line.max(1), "clippy::too_many_lines"));
+            }
+        }
+    }
+    None
+}
+
 impl<'a> FunctionSizeChecker<'a> {
+    fn check_escape_hatches(&mut self, item_label: &str, attrs: &[syn::Attribute]) {
+        if self.is_test_file {
+            return;
+        }
+        if let Some((line, lint_name)) = find_disallowed_escape_hatch(attrs) {
+            self.errors.push(format!(
+                "Rule: AGENTS.md Rule 4 (Disallowed Escape Hatch Attribute `{}`)\nLocation: {:?}:{}\nItem: {}\nAction: Do not bypass structural complexity limits with `#[allow({})]`. Group related arguments into a cohesive context struct or decompose the function.",
+                lint_name, self.path, line, item_label, lint_name
+            ));
+        }
+    }
+
     fn check_fn_size(
         &mut self,
         fn_name: &str,
@@ -356,6 +394,8 @@ impl<'a> FunctionSizeChecker<'a> {
         if self.is_test_file {
             return;
         }
+
+        self.check_escape_hatches(&format!("Function `{}`", fn_name), attrs);
 
         let start = attrs
             .first()
@@ -379,6 +419,16 @@ impl<'a> FunctionSizeChecker<'a> {
 }
 
 impl<'ast, 'a> Visit<'ast> for FunctionSizeChecker<'a> {
+    fn visit_file(&mut self, node: &'ast syn::File) {
+        self.check_escape_hatches("File", &node.attrs);
+        syn::visit::visit_file(self, node);
+    }
+
+    fn visit_item_mod(&mut self, node: &'ast syn::ItemMod) {
+        self.check_escape_hatches(&format!("Module `{}`", node.ident), &node.attrs);
+        syn::visit::visit_item_mod(self, node);
+    }
+
     fn visit_item_fn(&mut self, node: &'ast syn::ItemFn) {
         let fn_name = node.sig.ident.to_string();
         self.check_fn_size(&fn_name, &node.attrs, node.sig.span(), node.block.span());
@@ -386,6 +436,7 @@ impl<'ast, 'a> Visit<'ast> for FunctionSizeChecker<'a> {
     }
 
     fn visit_item_impl(&mut self, node: &'ast syn::ItemImpl) {
+        self.check_escape_hatches("Impl Block", &node.attrs);
         syn::visit::visit_item_impl(self, node);
     }
 
@@ -399,22 +450,34 @@ impl<'ast, 'a> Visit<'ast> for FunctionSizeChecker<'a> {
         let fn_name = node.sig.ident.to_string();
         if let Some(block) = &node.default {
             self.check_fn_size(&fn_name, &node.attrs, node.sig.span(), block.span());
+        } else {
+            self.check_escape_hatches(&format!("Trait Method `{}`", fn_name), &node.attrs);
         }
         syn::visit::visit_trait_item_fn(self, node);
     }
 }
 
-/// Scans source lines and calculates code vs doc character counts.
-/// Accurately counts Unicode characters (preventing multi-byte CJK penalty)
-/// and strictly prioritizes comments before raw strings to prevent parser locks.
+/// Checks if a comment string contains non-English CJK/Hangul scripts.
+fn contains_non_english_script(text: &str) -> bool {
+    text.chars().any(|c| {
+        ('\u{1100}'..='\u{11FF}').contains(&c) // Hangul Jamo
+            || ('\u{3040}'..='\u{30FF}').contains(&c) // Hiragana & Katakana
+            || ('\u{3130}'..='\u{318F}').contains(&c) // Hangul Compatibility Jamo
+            || ('\u{AC00}'..='\u{D7AF}').contains(&c) // Hangul Syllables
+            || ('\u{4E00}'..='\u{9FFF}').contains(&c) // CJK Unified Ideographs
+    })
+}
+
+/// Scans source lines and calculates code vs doc character counts, while detecting non-English comments.
 fn scan_code_and_comments(
     lines: &[&str],
     is_test_file: bool,
     test_ranges: &[RangeInclusive<usize>],
-) -> (usize, usize, usize) {
+) -> (usize, usize, usize, Option<usize>) {
     let mut prod_logical_code_chars = 0;
     let mut doc_chars = 0;
     let mut inline_test_chars = 0;
+    let mut first_non_english_comment_line = None;
     let mut block_comment_depth = 0;
     let mut in_raw_string = false;
     let mut in_normal_string = false;
@@ -422,7 +485,6 @@ fn scan_code_and_comments(
     for (line_idx, line) in lines.iter().enumerate() {
         let line_num = line_idx + 1; // 1-indexed
         let trimmed = line.trim();
-        // Use true Unicode character count (+1 for newline), not UTF-8 bytes
         let line_char_count = line.chars().count() + 1;
 
         if trimmed.is_empty() {
@@ -432,6 +494,9 @@ fn scan_code_and_comments(
         let is_in_test_scope = is_test_file || test_ranges.iter().any(|r| r.contains(&line_num));
 
         if block_comment_depth > 0 {
+            if first_non_english_comment_line.is_none() && contains_non_english_script(trimmed) {
+                first_non_english_comment_line = Some(line_num);
+            }
             if !is_in_test_scope {
                 doc_chars += line_char_count;
             } else if !is_test_file {
@@ -463,6 +528,11 @@ fn scan_code_and_comments(
             if let Some(pos) = slash_pos {
                 let code_part = trimmed[..pos].trim();
                 let comment_part = &trimmed[pos..];
+                if first_non_english_comment_line.is_none()
+                    && contains_non_english_script(comment_part)
+                {
+                    first_non_english_comment_line = Some(line_num);
+                }
                 if !is_in_test_scope {
                     prod_logical_code_chars += code_part.chars().count() + 1;
                     doc_chars += comment_part.chars().count();
@@ -479,6 +549,9 @@ fn scan_code_and_comments(
 
         // Line comments MUST be evaluated BEFORE raw string markers (when outside strings)
         if trimmed.starts_with("//") {
+            if first_non_english_comment_line.is_none() && contains_non_english_script(trimmed) {
+                first_non_english_comment_line = Some(line_num);
+            }
             if !is_in_test_scope {
                 doc_chars += line_char_count;
             } else if !is_test_file {
@@ -489,6 +562,9 @@ fn scan_code_and_comments(
 
         // Check standard block comment start (supporting nested block comments)
         if trimmed.starts_with("/*") {
+            if first_non_english_comment_line.is_none() && contains_non_english_script(trimmed) {
+                first_non_english_comment_line = Some(line_num);
+            }
             let opens = trimmed.matches("/*").count();
             let closes = trimmed.matches("*/").count();
             if opens > closes {
@@ -537,6 +613,10 @@ fn scan_code_and_comments(
         if let Some(slash_pos) = slash_pos {
             let code_part = trimmed[..slash_pos].trim();
             let comment_part = &trimmed[slash_pos..];
+            if first_non_english_comment_line.is_none() && contains_non_english_script(comment_part)
+            {
+                first_non_english_comment_line = Some(line_num);
+            }
             if !is_in_test_scope {
                 prod_logical_code_chars += code_part.chars().count() + 1;
                 doc_chars += comment_part.chars().count();
@@ -550,7 +630,12 @@ fn scan_code_and_comments(
         }
     }
 
-    (prod_logical_code_chars, doc_chars, inline_test_chars)
+    (
+        prod_logical_code_chars,
+        doc_chars,
+        inline_test_chars,
+        first_non_english_comment_line,
+    )
 }
 
 /// Helper to parse character literal byte length starting with `'`.

@@ -394,41 +394,57 @@ pub fn hello() -> &'static str {
 }
 
 #[test]
-fn test_unicode_korean_comments_do_not_suffer_byte_penalty() {
-    // 60 lines of Korean comments, ~30 chars each = ~1,800 Korean chars.
-    // In UTF-8 bytes, this is ~5,400 bytes.
-    // If the linter used bytes (Rule 3 limit = 4,000 bytes), this would fail.
-    // Under true Unicode char counting, 1,800 chars <= 4,000 chars, so it passes!
-    let mut korean_doc = String::new();
-    for i in 0..60 {
-        korean_doc.push_str(&format!(
-            "// 한국어 주석 테스트 줄 {:02}: 컴파일러 토큰 예산이 유니코드 글자 수로 계산되는지 검증합니다.\n",
-            i
-        ));
-    }
-
-    let source = format!(
-        r#"//! # 한국어 유니코드 주석 테스트 모듈
+fn test_non_english_comments_rejected_while_utf8_string_literals_pass() {
+    // 1. Non-English (Hangul/CJK) in comments or doc headers must be rejected at compile time.
+    let bad_comment_source = format!(
+        r#"//! # Non-English Comment Test Module
 //!
 //! ## Overview
-//! 본 모듈은 CJK 다국어 주석이 UTF-8 바이트(Byte) 단위가 아닌 유니코드 글자(Char) 단위로 측정됨을 증명하는 공식 검증 모듈입니다.
+//! Verifies that CJK and Hangul characters inside documentation or inline comments are rejected.
 //!
 //! ## Search Tags
 //! #test, #linter
 
-{}
-pub fn run_korean_task() -> bool {{
+// Non-English comment char: {}
+pub fn run_task() -> bool {{
     true
 }}
 "#,
-        korean_doc
+        '\u{AC00}'
+    );
+    let res_err = linter::check_source(Path::new("src/korean_doc.rs"), &bad_comment_source);
+    assert!(
+        res_err.is_err(),
+        "Expected non-English comment to be rejected: {:?}",
+        res_err
+    );
+    assert!(
+        res_err
+            .unwrap_err()
+            .contains("English-Only Documentation & Comments")
     );
 
-    let res = linter::check_source(Path::new("src/korean_doc.rs"), &source);
+    // 2. UTF-8 characters inside code string literals (e.g. i18n or parser tests) must still pass!
+    let utf8_literal_source = format!(
+        r#"//! # UTF-8 String Literal Test Module
+//!
+//! ## Overview
+//! Verifies that UTF-8 string literals in executable code are permitted when all comments are in English.
+//!
+//! ## Search Tags
+//! #test, #linter
+
+pub fn sample_i18n_literal() -> &'static str {{
+    "{}"
+}}
+"#,
+        '\u{AC00}'
+    );
+    let res_ok = linter::check_source(Path::new("src/utf8_literal.rs"), &utf8_literal_source);
     assert!(
-        res.is_ok(),
-        "Expected Unicode Korean comments to pass without byte penalty: {:?}",
-        res
+        res_ok.is_ok(),
+        "Expected UTF-8 string literal with English-only comments to pass: {:?}",
+        res_ok
     );
 }
 
@@ -1233,4 +1249,35 @@ pub mod child_dir;
         res_ok
     );
 }
+
+#[test]
+fn test_too_many_arguments_escape_hatch_disallowed_and_fails_rule_4() {
+    let source = r#"//! # Too Many Arguments Escape Hatch Test Module
+//!
+//! ## Overview
+//! Verifies that `#[allow(clippy::too_many_arguments)]` is blocked by Rule 4 even on short functions.
+//!
+//! ## Search Tags
+//! #test, #linter, #escape-hatch
+
+#[allow(clippy::too_many_arguments)]
+pub fn bloated_signature(a: i32, b: i32, c: i32, d: i32, e: i32, f: i32, g: i32, h: i32) -> i32 {
+    a + b + c + d + e + f + g + h
+}
+"#;
+    let res = linter::check_source(Path::new("src/bloated_sig.rs"), source);
+    assert!(
+        res.is_err(),
+        "Expected #[allow(clippy::too_many_arguments)] to fail Rule 4: {:?}",
+        res
+    );
+    let err = res.unwrap_err();
+    assert!(err.contains("Rule 4"), "Error was: {}", err);
+    assert!(
+        err.contains("too_many_arguments"),
+        "Error should mention too_many_arguments: {}",
+        err
+    );
+}
+
 
